@@ -51,6 +51,7 @@ int plugin_is_GPL_compatible;
 
 namespace ana
 {
+    // TODO: throw in analyzer.h/analyzer.cc or tree.h/tree.cc maybe
     tree get_field_by_name(tree type, const char *name)
     {
         for (tree field = TYPE_FIELDS(type); field; field = TREE_CHAIN(field))
@@ -68,14 +69,15 @@ namespace ana
         return NULL_TREE;
     }
 
+    // maybe there is one that already exists in region.cc or region_model.cc?
     const svalue *get_type_size_in_bytes(tree type, region_model_manager *mgr)
     {
         tree type_size = TYPE_SIZE_UNIT(type);
         if (type_size != NULL_TREE && TREE_CODE(type_size) == INTEGER_CST)
         {
-            HOST_WIDE_INT size_in_bytes = tree_to_uhwi(type_size);
-            size_t size_in_bytes_unsigned = (size_t)size_in_bytes;
-            inform(input_location, "Size of struct: %lu bytes\n", size_in_bytes);
+//            HOST_WIDE_INT size_in_bytes = tree_to_uhwi(type_size);
+//            size_t size_in_bytes_unsigned = (size_t)size_in_bytes;
+//            inform(input_location, "Size of struct: %lu bytes\n", size_in_bytes);
             const svalue *sz = mgr->get_or_create_constant_svalue(type_size);
             return sz;
         }
@@ -92,17 +94,21 @@ namespace ana
         void impl_call_pre(const call_details &cd) const final override;
     };
 
+    // add space before parenthesis in function
     void
-    kf_PyLong_FromLong::impl_call_pre(const call_details &cd) const
+    kf_PyLong_FromLong::impl_call_pre (const call_details &cd) const
     {
-        // will this work for multiple pylong_fromlongs?
+        // check out call-details for location 
+        // location_t get_location () const; --> cd.get_location()
         inform(input_location, "got here: pylong_from_long");
-        // this does not take into consideration the small int range 
+        // current implementation does not take into consideration the small int range 
         region_model *model = cd.get_model();
         region_model_manager *mgr = cd.get_manager();
 
-        tree pyobj_tree = get_stashed_type_by_name("PyObject");
-        const svalue *pyobj_size = get_type_size_in_bytes(pyobj_tree, mgr);
+        // 
+        tree pyobj_tree = get_stashed_type_by_name ("PyObject"); // null tree if it fails
+        const svalue *pyobj_size = get_type_size_in_bytes(pyobj_tree, mgr); 
+        // for now just say unknown size but actually slightly bigger
         const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(pyobj_size, cd.get_ctxt());
 
         tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
@@ -111,6 +117,7 @@ namespace ana
         model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
 
         // what do I really need from ob_type?
+        // set it to unknown/conjured value or something for now. 
 //        tree ob_type = get_field_by_name(pyobject, "ob_type");
 //        const region *ob_type_field_reg = mgr->get_field_region(new_pyobject_reg, ob_type);
 //        const svalue *type_svalue = mgr->get_or_create_constant_svalue(py_object_type);
@@ -124,7 +131,7 @@ namespace ana
         // i should axctually use this input long somewhere
         // const svalue *input_long_sval = cd.get_arg_svalue(0);
     }
-/*
+
     class kf_Py_DECREF : public known_function
     {
     public:
@@ -132,7 +139,7 @@ namespace ana
         {
             return (cd.num_args() == 1) ; // should check that arg is pyobject here
         }
-        void impl_call_pre(const call_details &cd) const final override;
+//        void impl_call_pre(const call_details &cd) const final override;
         void impl_call_post(const call_details &) const final override;
     };
 
@@ -140,7 +147,7 @@ namespace ana
     kf_Py_DECREF::impl_call_post(const call_details &cd) const{
 
         if (1)
-            inform(input_location, "got here: py_decref impl call");
+            inform(input_location, "got here: py_decref impl_call_post call");
 
         region_model *model = cd.get_model();
         region_model_manager *mgr = cd.get_manager();
@@ -152,25 +159,21 @@ namespace ana
         tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
         const region *ob_refcnt_region = mgr->get_field_region(pyobj_reg, ob_refcnt_tree);
         const svalue *ob_refcnt_sval = model->get_store_value(ob_refcnt_region, cd.get_ctxt()); 
-        // this is 1 here? 
 
 //        pretty_printer pp, pp1, pp2;
 //        ob_refcnt_sval->dump_to_pp(&pp, true);
 //        inform(input_location, "POST py decref %s\n", pp_formatted_text(&pp));
 //        const svalue *one_sval = mgr->get_or_create_int_cst(integer_type_node, 1);
 //        one_sval->dump_to_pp(&pp1, true);
-//        inform(input_location, "the ONEEE %s\n", pp_formatted_text(&pp1));
 //        const svalue *new_ob_refcnt_sval = mgr->get_or_create_binop(integer_type_node, MINUS_EXPR, ob_refcnt_sval, one_sval);
 //        new_ob_refcnt_sval->dump_to_pp(&pp2, true);
-//        inform(input_location, "NEWWWWWWWWW %s\n", pp_formatted_text(&pp2));
 
-        if (tree_int_cst_equal(ob_refcnt_sval->maybe_get_constant(), integer_zero_node))
+        if (tree_int_cst_equal(ob_refcnt_sval->maybe_get_constant(), integer_one_node))
         {
             inform(input_location, "suppppp");
             model->unbind_region_and_descendents(pyobj_reg, POISON_KIND_FREED);
-            model->unset_dynamic_extents(pyobj_reg);
+//            model->unset_dynamic_extents(pyobj_reg);
         } else {
-
             inform(input_location, "nuppppppppp");
         }
     }
@@ -178,8 +181,8 @@ namespace ana
     void
     kf_Py_DECREF::impl_call_pre(const call_details &cd) const
     {
-        // need to somehow retrieve the region associated with this pyobject (which we can get through svalue)
-        // and then we can get its field region and decrement it 
+        if (1)
+            inform(input_location, "got here: py_decref impl_call_pre call");
 //        region_model *model = cd.get_model();
 //        region_model_manager *mgr = cd.get_manager();
 //
@@ -212,7 +215,7 @@ namespace ana
 
 //        model->set_value(ob_refcnt_region, new_ob_refcnt_sval, cd.get_ctxt());
     }
-*/
+
     static void
     cpython_analyzer_init_cb(void *gcc_data, void * /*user_data*/)
     {
@@ -220,11 +223,13 @@ namespace ana
         LOG_SCOPE(iface->get_logger());
         if (1)
             inform(input_location, "got here: cpython_analyzer_init_cb");
+        // if e.g PyObject not found, don't bother registering known function ***
         iface->register_known_function("PyLong_FromLong",
                                        make_unique<kf_PyLong_FromLong>());
         // PyDECREF is a macro that goes to _Py_DECREF in python 3.9 but Py_DECREF in latest
- //       iface->register_known_function("_Py_DECREF",
- //                                      make_unique<kf_Py_DECREF>());
+        // do _Py_Dealloc
+        iface->register_known_function("_Py_DECREF",
+                                       make_unique<kf_Py_DECREF>());
     }
 }
 

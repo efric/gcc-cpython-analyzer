@@ -110,6 +110,7 @@ stash_named_constants (logger *logger, const translation_unit &tu)
 /* Call into TU to try to find values for the names we care about.
    If found, stash their values within analyzer_stashed_types  */
 
+// suggestion: add some functionality for plugins 
 static void
 stash_named_types (logger *logger, const translation_unit &tu)
 {
@@ -141,7 +142,8 @@ on_finish_translation_unit (const translation_unit &tu)
 				       *global_dc->printer));
   stash_named_constants (the_logger.get_logger (), tu);
 
-  // perhaps later add to only do this if plugin itself is enabled
+  // TODO: perhaps later add to only do this if plugin itself is enabled
+  // plugin hook
   stash_named_types (the_logger.get_logger (), tu);
 }
 
