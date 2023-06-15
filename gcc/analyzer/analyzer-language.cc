@@ -31,6 +31,7 @@ along with GCC; see the file COPYING3.  If not see
 
 /* Map from identifier to INTEGER_CST.  */
 static GTY (()) hash_map <tree, tree> *analyzer_stashed_constants;
+static GTY (()) hash_map <tree, tree> *analyzer_stashed_types;
 
 #if ENABLE_ANALYZER
 
@@ -64,6 +65,32 @@ maybe_stash_named_constant (logger *logger,
     }
 }
 
+static void
+maybe_stash_named_type(logger *logger,
+                           const translation_unit &tu,
+                           const char *name)
+{
+    LOG_FUNC_1(logger, "name: %qs", name);
+    if (!analyzer_stashed_types)
+      analyzer_stashed_types = hash_map<tree, tree>::create_ggc();
+
+    tree id = get_identifier(name);
+    if (tree t = tu.lookup_type_by_id(id))
+    {
+      gcc_assert (TREE_CODE (t) == RECORD_TYPE);
+      analyzer_stashed_types->put (id, t);
+      if (logger)
+      {
+  logger->log("found %qs: %qE", name, t);
+      }
+    }
+    else
+    {
+      if (logger)
+  logger->log("%qs: not found", name);
+    }
+}
+
 /* Call into TU to try to find values for the names we care about.
    If found, stash their values within analyzer_stashed_constants.  */
 
@@ -78,6 +105,17 @@ stash_named_constants (logger *logger, const translation_unit &tu)
   maybe_stash_named_constant (logger, tu, "O_WRONLY");
   maybe_stash_named_constant (logger, tu, "SOCK_STREAM");
   maybe_stash_named_constant (logger, tu, "SOCK_DGRAM");
+}
+
+/* Call into TU to try to find values for the names we care about.
+   If found, stash their values within analyzer_stashed_types  */
+
+static void
+stash_named_types (logger *logger, const translation_unit &tu)
+{
+  LOG_SCOPE (logger);
+
+  maybe_stash_named_type (logger, tu, "PyObject");
 }
 
 /* Hook for frontend to call into analyzer when TU finishes.
@@ -102,6 +140,9 @@ on_finish_translation_unit (const translation_unit &tu)
     the_logger.set_logger (new logger (logfile, 0, 0,
 				       *global_dc->printer));
   stash_named_constants (the_logger.get_logger (), tu);
+
+  // perhaps later add to only do this if plugin itself is enabled
+  stash_named_types (the_logger.get_logger (), tu);
 }
 
 /* Lookup NAME in the named constants stashed when the frontend TU finished.
@@ -116,6 +157,20 @@ get_stashed_constant_by_name (const char *name)
   if (tree *slot = analyzer_stashed_constants->get (id))
     {
       gcc_assert (TREE_CODE (*slot) == INTEGER_CST);
+      return *slot;
+    }
+  return NULL_TREE;
+}
+
+tree
+get_stashed_type_by_name (const char *name)
+{
+  if (!analyzer_stashed_types)
+    return NULL_TREE;
+  tree id = get_identifier (name);
+  if (tree *slot = analyzer_stashed_types->get (id))
+    {
+      gcc_assert (TREE_CODE (*slot) == RECORD_TYPE);
       return *slot;
     }
   return NULL_TREE;

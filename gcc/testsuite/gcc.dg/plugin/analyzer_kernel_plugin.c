@@ -47,11 +47,12 @@
 
 int plugin_is_GPL_compatible;
 
-#if ENABLE_ANALYZER
+// #if ENABLE_ANALYZER
 
 namespace ana {
 
 /* Implementation of "copy_from_user" and "copy_to_user".  */
+// so the plugin makes known some specific things when considering analyzing these functions
   
 class copy_across_boundary_fn : public known_function
 {
@@ -64,53 +65,69 @@ class copy_across_boundary_fn : public known_function
     return cd.num_args () == 3;
   }
 
+  // implicitly call pre (pre what tho)
   void impl_call_pre (const call_details &cd) const final override
   {
     region_model_manager *mgr = cd.get_manager ();
     region_model *model = cd.get_model ();
     region_model_context *ctxt = cd.get_ctxt ();
 
-    const svalue *dest_sval = cd.get_arg_svalue (0);
+    // svalue == symbolic value (in the context of symbolic execution)
+    const svalue *dest_sval = cd.get_arg_svalue (0);  
     const svalue *src_sval = cd.get_arg_svalue (1);
     const svalue *num_bytes_sval = cd.get_arg_svalue (2);
 
+    // retrieve destination memory region
     const region *dest_reg = model->deref_rvalue (dest_sval,
 						  cd.get_arg_tree (0),
 						  ctxt);
+    // src region
     const region *src_reg = model->deref_rvalue (src_sval,
 						 cd.get_arg_tree (1),
 						 ctxt);
-    if (const svalue *bounded_sval
-	  = model->maybe_get_copy_bounds (src_reg, num_bytes_sval))
+    
+    // check to see if a more accurate bound can be obtained
+    if (const svalue *bounded_sval = model->maybe_get_copy_bounds (src_reg, num_bytes_sval)) 
       num_bytes_sval = bounded_sval;
 
-    if (tree cst = num_bytes_sval->maybe_get_constant ())
-      if (zerop (cst))
-	/* No-op.  */
-	return;
+    
+    if (tree cst = num_bytes_sval->maybe_get_constant())
+      if (zerop(cst))
+        /* No-op.  */
+        return;
 
+    // get sized source region 
     const region *sized_src_reg = mgr->get_sized_region (src_reg,
 							 NULL_TREE,
 							 num_bytes_sval);
 
+    
+    // symbolic value of data that is being copied from src to dst 
     const svalue *copied_sval
       = model->get_store_value (sized_src_reg, ctxt);
+    
+    // get sized dest region
     const region *sized_dest_reg = mgr->get_sized_region (dest_reg,
 							  NULL_TREE,
 							  num_bytes_sval);
 
+    // check if region model context is not NULL
     if (ctxt)
       {
+    // if not null, bifurcate state (failure and success)
+    // aka function may have two different outcomes
+
 	/* Bifurcate state, creating a "failure" out-edge.  */
 	ctxt->bifurcate (make_unique<copy_failure> (cd));
 
-	/* The "unbifurcated" state is the "success" case.  */
+	/* The "unbifurcated" state is the "success" case.  */ // success case 
 	copy_success success (cd,
 			      sized_dest_reg,
 			      copied_sval,
 			      sized_src_reg,
 			      untrusted_source_p (),
 			      untrusted_destination_p ());
+
 	success.update_model (model, NULL, ctxt);
       }
   }
@@ -141,12 +158,12 @@ class copy_across_boundary_fn : public known_function
       model->update_for_zero_return (cd, true);
       model->set_value (m_sized_dest_reg, m_copied_sval, ctxt);
       if (ctxt && m_untrusted_source)
-	model->mark_as_tainted (m_copied_sval, ctxt);
+        model->mark_as_tainted(m_copied_sval, ctxt);
       if (m_untrusted_destination)
-	model->maybe_complain_about_infoleak (m_sized_dest_reg,
-					      m_copied_sval,
-					      m_sized_src_reg,
-					      ctxt);
+        model->maybe_complain_about_infoleak(m_sized_dest_reg,
+                                             m_copied_sval,
+                                             m_sized_src_reg,
+                                             ctxt);
       return true;
     }
 
@@ -225,7 +242,7 @@ kernel_analyzer_init_cb (void *gcc_data, void */*user_data*/)
 
 } // namespace ana
 
-#endif /* #if ENABLE_ANALYZER */
+// #endif /* #if ENABLE_ANALYZER */
 
 int
 plugin_init (struct plugin_name_args *plugin_info,

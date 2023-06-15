@@ -85,8 +85,8 @@ along with GCC; see the file COPYING3.  If not see
      arr[3] = f;  (6)
        After (6), we lose the symbolic binding for "arr[j]" since we could
        have overwritten it, and gain a concrete binding for bits 24-31
-       again, this time with svalue "INIT_VAL(e)":
-       cluster: {bits 24-31: "INIT_VAL(d)";
+       again, this time with svalue "INIT_VAL(f)":
+       cluster: {bits 24-31: "INIT_VAL(f)";
                  flags: {TOUCHED}}
        The cluster is still flagged as touched, so that we know that
        accesses to other elements are "UNKNOWN" rather than

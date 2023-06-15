@@ -24,7 +24,7 @@
 
 int plugin_is_GPL_compatible;
 
-#if ENABLE_ANALYZER
+// #if ENABLE_ANALYZER
 
 namespace ana {
 
@@ -100,6 +100,7 @@ public:
     return loc;
   }
 
+  
   label_text describe_state_change (const evdesc::state_change &change)
     final override
   {
@@ -109,9 +110,10 @@ public:
     if (change.is_global_p ()
 	&& change.m_new_state == m_sm.get_start_state ())
       return change.formatted_print ("acquiring the GIL here");
-    return label_text ();
+    return label_text (); // basically nothing will be shown
   }
 
+  // not supe rsure about this
   diagnostic_event::meaning
   get_meaning_for_state_change (const evdesc::state_change &change)
     const final override
@@ -148,6 +150,8 @@ class double_save_thread : public gil_diagnostic
     return "double_save_thread";
   }
 
+  // double_save_thread might be instantiated for each occurrence of issue found in code
+  // check to see if another double_save_thread is equal. if it is analyzer may avoid redundant reporting
   bool subclass_equal_p (const pending_diagnostic &base_other) const override
   {
     const double_save_thread &sub_other
@@ -268,7 +272,7 @@ gil_state_machine::gil_state_machine (logger *logger)
 : state_machine ("gil", logger)
 {
   m_released_gil = add_state ("released_gil");
-  m_stop = add_state ("stop");
+  m_stop = add_state ("stop"); // GIL is already held or acquired and no release has occured yet aka error
 }
 
 struct cb_data
@@ -322,62 +326,64 @@ gil_state_machine::check_for_pyobject_in_call (sm_context *sm_ctxt,
 
 /* Implementation of state_machine::on_stmt vfunc for gil_state_machine.  */
 
-bool
-gil_state_machine::on_stmt (sm_context *sm_ctxt,
-			    const supernode *node,
-			    const gimple *stmt) const
+bool gil_state_machine::on_stmt(sm_context *sm_ctxt,
+                                const supernode *node,
+                                const gimple *stmt) const
 {
-  const state_t global_state = sm_ctxt->get_global_state ();
-  if (const gcall *call = dyn_cast <const gcall *> (stmt))
+    const state_t global_state = sm_ctxt->get_global_state();
+    if (const gcall *call = dyn_cast<const gcall *>(stmt))
     {
-      if (tree callee_fndecl = sm_ctxt->get_fndecl_for_call (call))
-	{
-	  if (is_named_call_p (callee_fndecl, "PyEval_SaveThread", call, 0))
-	    {
-	      if (0)
-		inform (input_location, "found call to %qs",
-			"PyEval_SaveThread");
-	      if (global_state == m_released_gil)
-		{
-		  sm_ctxt->warn (node, stmt, NULL_TREE,
-				 make_unique<double_save_thread> (*this, call));
-		  sm_ctxt->set_global_state (m_stop);
-		}
-	      else
-		sm_ctxt->set_global_state (m_released_gil);
-	      return true;
-	    }
-	  else if (is_named_call_p (callee_fndecl, "PyEval_RestoreThread",
-				    call, 1))
-	    {
-	      if (0)
-		inform (input_location, "found call to %qs",
-			"PyEval_SaveThread");
-	      if (global_state == m_released_gil)
-		sm_ctxt->set_global_state (m_start);
-	      return true;
-	    }
-	  else if (global_state == m_released_gil)
-	    {
-	      /* Find PyObject * args of calls to fns with unknown bodies.  */
-	      if (!fndecl_has_gimple_body_p (callee_fndecl))
-		check_for_pyobject_in_call (sm_ctxt, node, call, callee_fndecl);
-	    }
-	}
-      else if (global_state == m_released_gil)
-	check_for_pyobject_in_call (sm_ctxt, node, call, NULL);
+  if (tree callee_fndecl = sm_ctxt->get_fndecl_for_call(call))
+  {
+    // Py_BEGIN_ALLOW_THREADS is just a macro for this (PyEval_SaveThread)
+    if (is_named_call_p(callee_fndecl, "PyEval_SaveThread", call, 0))
+    {
+    if (0)
+      inform(input_location, "found call to %qs",
+             "PyEval_SaveThread");
+    if (global_state == m_released_gil) // if GIL is already released, then you have encountered a double_save_thread problem
+    {
+      sm_ctxt->warn(node, stmt, NULL_TREE,
+                    make_unique<double_save_thread>(*this, call));
+      sm_ctxt->set_global_state(m_stop);
+    } // otherwise there are no problems; set global state to release
+    else
+      sm_ctxt->set_global_state(m_released_gil);
+    return true;
     }
-  else
+    // Py_END_ALLOW_THREADS is macro for this (PyEval_RestoreThread)
+    // in this case, let's set the global_state to m_start
+    // mstart: GIL is acquired/started again after it was previously released by a PyEval_SaveThread
+    else if (is_named_call_p(callee_fndecl, "PyEval_RestoreThread",
+                             call, 1))
+    {
+    if (0)
+      inform(input_location, "found call to %qs",
+             "PyEval_SaveThread");
     if (global_state == m_released_gil)
-      {
-	/* Walk the stmt, finding uses of PyObject (or "subclasses").  */
-	cb_data d (*this, sm_ctxt, node, stmt);
-	walk_stmt_load_store_addr_ops (const_cast <gimple *> (stmt), &d,
-				       check_for_pyobject,
-				       check_for_pyobject,
-				       check_for_pyobject);
+      sm_ctxt->set_global_state(m_start);
+    return true;
     }
-  return false;
+    else if (global_state == m_released_gil)
+    {
+    /* Find PyObject * args of calls to fns with unknown bodies.  */
+    if (!fndecl_has_gimple_body_p(callee_fndecl))
+      check_for_pyobject_in_call(sm_ctxt, node, call, callee_fndecl);
+    }
+  }
+  else if (global_state == m_released_gil)
+    check_for_pyobject_in_call(sm_ctxt, node, call, NULL);
+    }
+    else if (global_state == m_released_gil)
+    {
+  /* Walk the stmt, finding uses of PyObject (or "subclasses").  */
+  cb_data d(*this, sm_ctxt, node, stmt);
+  walk_stmt_load_store_addr_ops(const_cast<gimple *>(stmt), &d,
+                                check_for_pyobject,
+                                check_for_pyobject,
+                                check_for_pyobject);
+    }
+    return false;
 }
 
 bool
@@ -417,7 +423,7 @@ gil_analyzer_init_cb (void *gcc_data, void */*user_data*/)
 
 } // namespace ana
 
-#endif /* #if ENABLE_ANALYZER */
+// #endif /* #if ENABLE_ANALYZER */
 
 int
 plugin_init (struct plugin_name_args *plugin_info,

@@ -119,6 +119,14 @@ call_details::arg_is_size_p (unsigned idx) const
   return types_compatible_p (get_arg_type (idx), size_type_node);
 }
 
+/* Return true if argument IDX is a long int. */
+
+bool
+call_details::arg_is_long_p (unsigned idx) const
+{
+  return types_compatible_p (get_arg_type (idx), long_integer_type_node);
+}
+
 /* Get the location of the call statement.  */
 
 location_t

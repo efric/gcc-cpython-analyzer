@@ -345,6 +345,7 @@ public:
 };
 
 extern tree get_stashed_constant_by_name (const char *name);
+extern tree get_stashed_type_by_name (const char *name);
 extern void log_stashed_constants (logger *logger);
 
 extern FILE *get_or_create_any_logfile ();

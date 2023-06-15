@@ -47,7 +47,7 @@
 
 int plugin_is_GPL_compatible;
 
-#if ENABLE_ANALYZER
+// #if ENABLE_ANALYZER
 
 namespace ana {
 
@@ -61,14 +61,13 @@ public:
     return true;
   }
 
-  void impl_call_pre (const call_details &cd) const final override
+  void impl_call_pre(const call_details &cd) const final override
   {
-    if (cd.get_lhs_type ())
-      {
-	const svalue *result
-	  = cd.get_manager ()->get_or_create_int_cst (cd.get_lhs_type (), 42);
-	cd.maybe_set_lhs (result);
-      }
+    if (cd.get_lhs_type())
+    {
+      const svalue *result = cd.get_manager()->get_or_create_int_cst(cd.get_lhs_type(), 42);
+      cd.maybe_set_lhs(result);
+    }
   }
 };
 
@@ -194,7 +193,7 @@ known_fn_analyzer_init_cb (void *gcc_data, void */*user_data*/)
 
 } // namespace ana
 
-#endif /* #if ENABLE_ANALYZER */
+// #endif /* #if ENABLE_ANALYZER */
 
 int
 plugin_init (struct plugin_name_args *plugin_info,

@@ -48,6 +48,7 @@ public:
     return POINTER_TYPE_P (get_arg_type (idx));
   }
   bool arg_is_size_p (unsigned idx) const;
+  bool arg_is_long_p (unsigned idx) const;
 
   const gcall *get_call_stmt () const { return m_call; }
   location_t get_location () const;
