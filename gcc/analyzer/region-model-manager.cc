@@ -237,6 +237,14 @@ region_model_manager::get_or_create_int_cst (tree type, poly_int64 val)
   return get_or_create_constant_svalue (tree_cst);
 }
 
+const svalue *
+region_model_manager::get_or_create_long_cst (tree type, poly_int64 val)
+{
+  gcc_assert (type);
+  tree tree_cst = build_int_cst_type (type, val);
+  return get_or_create_constant_svalue (tree_cst);
+}
+
 /* Return the svalue * for the constant_svalue for the NULL pointer
    of POINTER_TYPE, creating it if necessary.  */
 
