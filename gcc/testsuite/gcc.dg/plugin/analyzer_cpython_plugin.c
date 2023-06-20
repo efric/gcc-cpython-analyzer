@@ -73,9 +73,9 @@ namespace ana
     // maybe there is one that already exists in region.cc or region_model.cc?
     const svalue *get_type_size_in_bytes(tree type, region_model_manager *mgr)
     {
-        
+
         tree type_size = TYPE_SIZE_UNIT(type);
-        
+
         if (type_size != NULL_TREE && TREE_CODE(type_size) == INTEGER_CST)
         {
             //            HOST_WIDE_INT size_in_bytes = tree_to_uhwi(type_size);
@@ -84,7 +84,7 @@ namespace ana
             const svalue *sz = mgr->get_or_create_constant_svalue(type_size);
             return sz;
         }
-        
+
         return mgr->get_or_create_unknown_svalue(type_size);
     }
 
@@ -102,33 +102,85 @@ namespace ana
     void
     kf_PyLong_FromLong::impl_call_pre(const call_details &cd) const
     {
-        inform(cd.get_location(), "got here: pylong_from_long");
-        // TODO: current implementation does not take into consideration the small int range
-        region_model *model = cd.get_model();
-        region_model_manager *mgr = cd.get_manager();
-
-        tree pyobj_tree = get_stashed_type_by_name("PyObject");
-        const svalue *pyobj_size = mgr->get_or_create_unknown_svalue(pyobj_tree);
-        const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(pyobj_size, cd.get_ctxt());
-
-        tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
-        const region *ob_refcnt_region = mgr->get_field_region(new_pyobj_region, ob_refcnt_tree);
-        const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
-        model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
-
-        // set it to unknown/conjured value or something for now.
-        tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
-        const region *ob_type_region = mgr->get_field_region(new_pyobj_region, ob_type_field);
-        const svalue *type_svalue = mgr->get_or_create_unknown_svalue(ob_type_field);
-        model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
-
-        if (cd.get_lhs_type())
+        /* Concrete custom_edge_info: a PyLong_FromLong call that fails, returning NULL.  */
+        class failure : public failed_call_info
         {
-            const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pyobj_region);
-            cd.maybe_set_lhs(ptr_sval);
+        public:
+            failure(const call_details &cd)
+                : failed_call_info(cd)
+            {
+            }
+
+            bool update_model(region_model *model,
+                              const exploded_edge *,
+                              region_model_context *ctxt) const final override
+            {
+                /* Return NULL; everything else is unchanged.  */
+                const call_details cd(get_call_details(model, ctxt));
+                region_model_manager *mgr = cd.get_manager();
+                if (cd.get_lhs_type())
+                {
+                    const svalue *zero = mgr->get_or_create_int_cst(cd.get_lhs_type(), 0);
+                    model->set_value(cd.get_lhs_region(),
+                                     zero,
+                                     cd.get_ctxt());
+                }
+                return true;
+            }
+        };
+
+        /* Concrete custom_edge_info: a PyLong_FromLong call that succeeds. */
+        class success : public call_info
+        {
+        public:
+            success(const call_details &cd)
+                : call_info(cd)
+            {
+            }
+
+            label_text get_desc(bool can_colorize) const final override
+            {
+                return make_label_text(can_colorize,
+                                       "when %qE succeeds",
+                                       get_fndecl());
+            }
+
+            bool update_model(region_model *model,
+                              const exploded_edge *,
+                              region_model_context *ctxt) const final override
+            {
+                const call_details cd(get_call_details(model, ctxt));
+                region_model_manager *mgr = cd.get_manager();
+
+                tree pyobj_tree = get_stashed_type_by_name("PyObject");
+                const svalue *pyobj_size = mgr->get_or_create_unknown_svalue(pyobj_tree);
+                const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(pyobj_size, cd.get_ctxt());
+
+                tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+                const region *ob_refcnt_region = mgr->get_field_region(new_pyobj_region, ob_refcnt_tree);
+                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
+                model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
+
+                tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
+                const region *ob_type_region = mgr->get_field_region(new_pyobj_region, ob_type_field);
+                const svalue *type_svalue = mgr->get_or_create_unknown_svalue(ob_type_field);
+                model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
+
+                if (cd.get_lhs_type())
+                {
+                    const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pyobj_region);
+                    cd.maybe_set_lhs(ptr_sval);
+                }
+                return true;
+            }
+
+        };
+
+        if (cd.get_ctxt())
+        {
+            cd.get_ctxt()->bifurcate(make_unique<failure>(cd));
+            cd.get_ctxt()->bifurcate(make_unique<success>(cd));
         }
-        // i should axctually use this input long somewhere?
-        // const svalue *input_long_sval = cd.get_arg_svalue(0);
     }
 
     class kf_Py_Dealloc : public known_function
@@ -144,10 +196,6 @@ namespace ana
     void
     kf_Py_Dealloc::impl_call_post(const call_details &cd) const
     {
-
-        if (1)
-            inform(cd.get_location(), "got here: py_decref impl_call_post call");
-
         region_model *model = cd.get_model();
         region_model_manager *mgr = cd.get_manager();
 
