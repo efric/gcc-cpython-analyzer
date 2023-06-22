@@ -374,6 +374,7 @@ extern label_text make_label_text_n (bool can_colorize,
 				     const char *plural_fmt, ...);
 
 extern bool fndecl_has_gimple_body_p (tree fndecl);
+extern tree get_field_by_name(tree type, const char *name);
 
 /* An RAII-style class for pushing/popping cfun within a scope.
    Doing so ensures we get "In function " announcements

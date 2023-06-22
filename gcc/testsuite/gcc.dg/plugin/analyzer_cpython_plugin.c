@@ -51,25 +51,6 @@ int plugin_is_GPL_compatible;
 
 namespace ana
 {
-    // TODO: throw in analyzer.h/analyzer.cc or tree.h/tree.cc maybe
-    tree get_field_by_name(tree type, const char *name)
-    {
-        for (tree field = TYPE_FIELDS(type); field; field = TREE_CHAIN(field))
-        {
-            if (TREE_CODE(field) == FIELD_DECL)
-            {
-                const char *field_name = IDENTIFIER_POINTER(DECL_NAME(field));
-                if (strcmp(field_name, name) == 0)
-                {
-                    inform(input_location, "found field: %s\n", name);
-                    // check the name here
-                    return field;
-                }
-            }
-        }
-        return NULL_TREE;
-    }
-
     // maybe there is one that already exists in region.cc or region_model.cc?
     const svalue *get_type_size_in_bytes(tree type, region_model_manager *mgr)
     {
@@ -95,13 +76,40 @@ namespace ana
         {
             return (cd.num_args() == 1 && cd.arg_is_long_p(0));
         }
-        void impl_call_pre(const call_details &cd) const final override;
+        void impl_call_post(const call_details &cd) const final override;
     };
 
     // add space before parenthesis in function
     void
-    kf_PyLong_FromLong::impl_call_pre(const call_details &cd) const
+    kf_PyLong_FromLong::impl_call_post(const call_details &cd) const
     {
+    //     region_model *model = cd.get_model();
+    //     region_model_manager *mgr = cd.get_manager();
+
+    //     tree pyobj_tree = get_stashed_type_by_name("PyObject");
+    //     const svalue *pyobj_size = mgr->get_or_create_unknown_svalue(pyobj_tree);
+    //     // const svalue *pyobj_size = get_type_size_in_bytes(pyobj_tree, mgr);
+    //     const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(pyobj_size, cd.get_ctxt());
+
+    //     tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+    //     const region *ob_refcnt_region = mgr->get_field_region(new_pyobj_region, ob_refcnt_tree);
+    //     const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
+    //     model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
+
+    //     // TODO: this should really be look up global var by name and set it to pointer of that
+    //     // so keep that in mind
+    //     tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
+    //     const region *ob_type_region = mgr->get_field_region(new_pyobj_region, ob_type_field);
+    //     const svalue *type_svalue = mgr->get_or_create_unknown_svalue(ob_type_field);
+    //     model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
+
+    //     if (cd.get_lhs_type())
+    //     {
+    //         const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pyobj_region);
+    //         cd.maybe_set_lhs(ptr_sval);
+    //     }
+    // }
+
         /* Concrete custom_edge_info: a PyLong_FromLong call that fails, returning NULL.  */
         class failure : public failed_call_info
         {
@@ -151,16 +159,21 @@ namespace ana
             {
                 const call_details cd(get_call_details(model, ctxt));
                 region_model_manager *mgr = cd.get_manager();
+                //
 
                 tree pyobj_tree = get_stashed_type_by_name("PyObject");
-                const svalue *pyobj_size = mgr->get_or_create_unknown_svalue(pyobj_tree);
-                const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(pyobj_size, cd.get_ctxt());
+                const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_tree);
+                const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(NULL, cd.get_ctxt());
+                // doing so makes the region "touched". is this fine?
+                model->set_value(new_pyobj_region, pyobj_svalue, cd.get_ctxt());
 
                 tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(new_pyobj_region, ob_refcnt_tree);
                 const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
                 model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
 
+                // TODO: this should really be look up global var by name and set it to pointer of that
+                // so keep that in mind
                 tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
                 const region *ob_type_region = mgr->get_field_region(new_pyobj_region, ob_type_field);
                 const svalue *type_svalue = mgr->get_or_create_unknown_svalue(ob_type_field);
@@ -173,13 +186,13 @@ namespace ana
                 }
                 return true;
             }
-
         };
 
         if (cd.get_ctxt())
         {
             cd.get_ctxt()->bifurcate(make_unique<failure>(cd));
             cd.get_ctxt()->bifurcate(make_unique<success>(cd));
+            cd.get_ctxt()->terminate_path();
         }
     }
 
@@ -233,7 +246,7 @@ namespace ana
         LOG_SCOPE(iface->get_logger());
         if (1)
             inform(input_location, "got here: cpython_analyzer_init_cb");
-        // if e.g PyObject not found, don't bother registering known function ***
+        // if e.g PyObject not found, don't bother registering known functions ***
         if (get_stashed_type_by_name("PyObject") == NULL_TREE)
             return;
         iface->register_known_function("PyLong_FromLong",

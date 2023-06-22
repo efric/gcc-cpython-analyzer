@@ -484,4 +484,22 @@ make_label_text_n (bool can_colorize, unsigned HOST_WIDE_INT n,
   return result;
 }
 
+tree get_field_by_name(tree type, const char *name)
+{
+  for (tree field = TYPE_FIELDS(type); field; field = TREE_CHAIN(field))
+  {
+    if (TREE_CODE(field) == FIELD_DECL)
+    {
+  const char *field_name = IDENTIFIER_POINTER(DECL_NAME(field));
+  if (strcmp(field_name, name) == 0)
+  {
+  inform(input_location, "found field: %s\n", name);
+  // check the name here
+  return field;
+  }
+    }
+  }
+  return NULL_TREE;
+}
+
 #endif /* #if ENABLE_ANALYZER */
