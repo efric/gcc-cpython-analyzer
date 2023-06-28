@@ -55,6 +55,9 @@ namespace ana
     static tree pyobj_tree = NULL_TREE;
     static tree varobj_tree = NULL_TREE;
     static tree pylistobj_tree = NULL_TREE;
+    static tree pylongobj_tree = NULL_TREE;
+    static tree pylongtype_tree = NULL_TREE;
+    static tree pylisttype_tree = NULL_TREE;
 
     // maybe there is one that already exists in region.cc or region_model.cc?
     const svalue *get_type_size_in_bytes(tree type, region_model_manager *mgr)
@@ -80,6 +83,27 @@ namespace ana
         tree size_tree = TYPE_SIZE_UNIT(pyobj_ptr_tree);
         const svalue *sizeof_sval = mgr->get_or_create_constant_svalue(size_tree);
         return sizeof_sval;
+    }
+
+    class kf_PyList_Append : public known_function
+    {
+    public:
+        bool matches_call_types_p(const call_details &cd) const final override
+        {
+            return (cd.num_args() == 2); // TODO: more checks here
+        }
+        void impl_call_pre(const call_details &) const final override;
+    };
+
+    void
+    kf_PyList_Append::impl_call_pre(const call_details &cd) const
+    {
+        // TODO: add check that op is pylisttype
+        // TODO: check newitem is not null
+
+        // get len
+        // get allocated
+        
     }
 
     class kf_PyList_New : public known_function
@@ -167,6 +191,9 @@ namespace ana
                 const svalue *size_cond_sval = mgr->get_or_create_binop(size_type_node, LE_EXPR, casted_size_sval, zero_sval);
 
                 // if size <= 0, ob_item = NULL
+                // maybe_get_constant might return NULL_TREE which will then not give us right result
+                // TODO: add some extra check here
+
                 if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node)) 
                 {
                     tree pyobj_ptr_tree = build_pointer_type(pyobj_tree);
@@ -179,15 +206,11 @@ namespace ana
                     const svalue *sizeof_sval = mgr->get_or_create_cast(size_sval->get_type(), get_sizeof_pyobjptr(mgr));
                     const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
                                                                        sizeof_sval, size_sval);
-                    const region *ob_item_sized_region = mgr->get_sized_region(ob_item_region, NULL_TREE, prod_sval);
+                    const region *ob_item_sized_region = mgr->get_sized_region(ob_item_region, NULL_TREE, size_sval);
                     model->zero_fill_region(ob_item_sized_region);
-                    const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(ob_item_field, ob_item_sized_region);
+                    const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(ob_item_field), ob_item_sized_region);
                     model->set_value(ob_item_region, ob_item_ptr_sval, cd.get_ctxt());
                 }
-
-                tree allocated_field = get_field_by_name(pylistobj_tree, "allocated");
-                const region *allocated_region = mgr->get_field_region(pylist_region, allocated_field);
-                model->set_value(allocated_region, size_sval, cd.get_ctxt());
 
                 /*
                 typedef struct {
@@ -218,7 +241,7 @@ namespace ana
 
                 tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
                 const region *ob_type_region = mgr->get_field_region(ob_base_region, ob_type_field);
-                const svalue *type_svalue = mgr->get_or_create_unknown_svalue(ob_type_field); //TODO: switch to actual
+                const svalue *type_svalue = mgr->get_or_create_unknown_svalue(TREE_TYPE(ob_type_field)); //TODO: switch to actual
                 model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
 
                 if (cd.get_lhs_type())
@@ -296,28 +319,69 @@ namespace ana
                               const exploded_edge *,
                               region_model_context *ctxt) const final override
             {
+                // const call_details cd(get_call_details(model, ctxt));
+                // region_model_manager *mgr = cd.get_manager();
+                // const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_tree);
+
+                // const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(NULL, cd.get_ctxt());
+                // model->set_value(new_pyobj_region, pyobj_svalue, cd.get_ctxt());
+
+                // tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+                // const region *ob_refcnt_region = mgr->get_field_region(new_pyobj_region, ob_refcnt_tree);
+                // const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
+                // model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
+
+                // // TODO: this should really be look up global var by name and set it to pointer of that
+                // // so keep that in mind
+                // tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
+                // const region *ob_type_region = mgr->get_field_region(new_pyobj_region, ob_type_field);
+                // const svalue *type_svalue = mgr->get_or_create_unknown_svalue(ob_type_field);
+                // model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
+
+                // if (cd.get_lhs_type())
+                // {
+                //     const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pyobj_region);
+                //     cd.maybe_set_lhs(ptr_sval);
+                // }
+                // return true;
+
+
+
                 const call_details cd(get_call_details(model, ctxt));
                 region_model_manager *mgr = cd.get_manager();
-                const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_tree);
 
-                const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(NULL, cd.get_ctxt());
-                model->set_value(new_pyobj_region, pyobj_svalue, cd.get_ctxt());
+                const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_tree);
+                const svalue *pylong_svalue = mgr->get_or_create_unknown_svalue(pylongobj_tree);
+
+                // Create a new region for PyLongObject.
+                const region *new_pylong_region = model->get_or_create_region_for_heap_alloc(NULL, cd.get_ctxt());
+                model->set_value(new_pylong_region, pylong_svalue, cd.get_ctxt());
+
+                // Create a region for the base PyObject within the PyLongObject.
+                tree ob_base_tree = get_field_by_name(pylongobj_tree, "ob_base");
+                const region *ob_base_region = mgr->get_field_region(new_pylong_region, ob_base_tree);
+                model->set_value(ob_base_region, pyobj_svalue, cd.get_ctxt());
 
                 tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
-                const region *ob_refcnt_region = mgr->get_field_region(new_pyobj_region, ob_refcnt_tree);
+                const region *ob_refcnt_region = mgr->get_field_region(ob_base_region, ob_refcnt_tree);
+                // after u do stash global variabvles, change this to pyssize
                 const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
                 model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
 
-                // TODO: this should really be look up global var by name and set it to pointer of that
-                // so keep that in mind
                 tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
-                const region *ob_type_region = mgr->get_field_region(new_pyobj_region, ob_type_field);
-                const svalue *type_svalue = mgr->get_or_create_unknown_svalue(ob_type_field);
+                const region *ob_type_region = mgr->get_field_region(ob_base_region, ob_type_field);
+                const svalue *type_svalue = mgr->get_or_create_unknown_svalue(TREE_TYPE(ob_type_field));
                 model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
+
+                // Set the PyLongObject value.
+                tree ob_digit_field = get_field_by_name(pylongobj_tree, "ob_digit");
+                const region *ob_digit_region = mgr->get_field_region(new_pylong_region, ob_digit_field);
+                const svalue *ob_digit_sval = cd.get_arg_svalue(0);
+                model->set_value(ob_digit_region, ob_digit_sval, cd.get_ctxt());
 
                 if (cd.get_lhs_type())
                 {
-                    const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pyobj_region);
+                    const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pylong_region);
                     cd.maybe_set_lhs(ptr_sval);
                 }
                 return true;
@@ -384,6 +448,12 @@ namespace ana
             varobj_tree = get_stashed_type_by_name("PyVarObject");
         if (pylistobj_tree == NULL_TREE)
             pylistobj_tree = get_stashed_type_by_name("PyListObject");
+        if (pylongobj_tree == NULL_TREE)
+            pylongobj_tree = get_stashed_type_by_name("PyLongObject");
+        if (pylongtype_tree == NULL_TREE)
+            pylongtype_tree = get_stashed_global_var_by_name("PyLong_Type");
+        if (pylisttype_tree == NULL_TREE)
+            pylisttype_tree = get_stashed_global_var_by_name("PyList_Type");
     }
 
     static void

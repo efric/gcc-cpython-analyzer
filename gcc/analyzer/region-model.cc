@@ -4824,7 +4824,7 @@ region_model::pop_frame (tree result_lvalue,
     } 
 
     // if our plugin is enabled; maybe query global stash later to see ?
-    check_pyobj_refcnt(retval, ctxt);
+    // check_pyobj_refcnt(retval, ctxt);
     unbind_region_and_descendents(frame_reg, POISON_KIND_POPPED_STACK);
 }
 

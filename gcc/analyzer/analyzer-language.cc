@@ -32,6 +32,7 @@ along with GCC; see the file COPYING3.  If not see
 /* Map from identifier to INTEGER_CST.  */
 static GTY (()) hash_map <tree, tree> *analyzer_stashed_constants;
 static GTY (()) hash_map <tree, tree> *analyzer_stashed_types;
+static GTY (()) hash_map <tree, tree> *analyzer_stashed_globals;
 
 #if ENABLE_ANALYZER
 
@@ -91,6 +92,32 @@ maybe_stash_named_type(logger *logger,
     }
 }
 
+static void
+maybe_stash_global_var(logger *logger,
+                           const translation_unit &tu,
+                           const char *name)
+{
+    LOG_FUNC_1(logger, "name: %qs", name);
+    if (!analyzer_stashed_globals)
+      analyzer_stashed_globals = hash_map<tree, tree>::create_ggc();
+
+    tree id = get_identifier(name);
+    if (tree t = tu.lookup_global_var_by_id(id))
+    {
+      gcc_assert (TREE_CODE (t) == RECORD_TYPE);
+      analyzer_stashed_globals->put (id, t);
+      if (logger)
+      {
+  logger->log("found %qs: %qE", name, t);
+      }
+    }
+    else
+    {
+      if (logger)
+  logger->log("%qs: not found", name);
+    }
+}
+
 /* Call into TU to try to find values for the names we care about.
    If found, stash their values within analyzer_stashed_constants.  */
 
@@ -119,6 +146,16 @@ stash_named_types (logger *logger, const translation_unit &tu)
   maybe_stash_named_type (logger, tu, "PyObject");
   maybe_stash_named_type (logger, tu, "PyListObject");
   maybe_stash_named_type (logger, tu, "PyVarObject");
+  maybe_stash_named_type (logger, tu, "PyLongObject");
+}
+
+static void
+stash_global_vars (logger *logger, const translation_unit &tu)
+{
+  LOG_SCOPE (logger);
+
+  maybe_stash_global_var (logger, tu, "PyLong_Type");
+  maybe_stash_global_var (logger, tu, "PyList_Type");
 }
 
 /* Hook for frontend to call into analyzer when TU finishes.
@@ -147,6 +184,7 @@ on_finish_translation_unit (const translation_unit &tu)
   // TODO: perhaps later add to only do this if plugin itself is enabled
   // plugin hook
   stash_named_types (the_logger.get_logger (), tu);
+  stash_global_vars (the_logger.get_logger (), tu);
 }
 
 /* Lookup NAME in the named constants stashed when the frontend TU finished.
@@ -173,6 +211,20 @@ get_stashed_type_by_name (const char *name)
     return NULL_TREE;
   tree id = get_identifier (name);
   if (tree *slot = analyzer_stashed_types->get (id))
+    {
+      gcc_assert (TREE_CODE (*slot) == RECORD_TYPE);
+      return *slot;
+    }
+  return NULL_TREE;
+}
+
+tree
+get_stashed_global_var_by_name (const char *name)
+{
+  if (!analyzer_stashed_globals)
+    return NULL_TREE;
+  tree id = get_identifier (name);
+  if (tree *slot = analyzer_stashed_globals->get (id))
     {
       gcc_assert (TREE_CODE (*slot) == RECORD_TYPE);
       return *slot;
