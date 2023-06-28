@@ -206,7 +206,7 @@ namespace ana
                     const svalue *sizeof_sval = mgr->get_or_create_cast(size_sval->get_type(), get_sizeof_pyobjptr(mgr));
                     const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
                                                                        sizeof_sval, size_sval);
-                    const region *ob_item_sized_region = mgr->get_sized_region(ob_item_region, NULL_TREE, size_sval);
+                    const region *ob_item_sized_region = mgr->get_sized_region(ob_item_region, NULL_TREE, prod_sval);
                     model->zero_fill_region(ob_item_sized_region);
                     const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(ob_item_field), ob_item_sized_region);
                     model->set_value(ob_item_region, ob_item_ptr_sval, cd.get_ctxt());
