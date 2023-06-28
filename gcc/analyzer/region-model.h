@@ -575,6 +575,8 @@ private:
   void check_external_function_for_access_attr (const gcall *call,
 						tree callee_fndecl,
 						region_model_context *ctxt) const;
+  
+  void check_pyobj_refcnt(const svalue *retval, region_model_context *ctxt);
 
   /* Storing this here to avoid passing it around everywhere.  */
   region_model_manager *const m_mgr;
