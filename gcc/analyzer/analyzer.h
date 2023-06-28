@@ -271,7 +271,7 @@ extern void register_known_functions_lang_cp (known_function_manager &kfm);
 extern void register_varargs_builtins (known_function_manager &kfm);
 
 /* Passed by pointer to PLUGIN_ANALYZER_INIT callbacks.  */
-
+// register pop function hook
 class plugin_analyzer_init_iface
 {
 public:

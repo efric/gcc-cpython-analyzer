@@ -117,6 +117,8 @@ stash_named_types (logger *logger, const translation_unit &tu)
   LOG_SCOPE (logger);
 
   maybe_stash_named_type (logger, tu, "PyObject");
+  maybe_stash_named_type (logger, tu, "PyListObject");
+  maybe_stash_named_type (logger, tu, "PyVarObject");
 }
 
 /* Hook for frontend to call into analyzer when TU finishes.
