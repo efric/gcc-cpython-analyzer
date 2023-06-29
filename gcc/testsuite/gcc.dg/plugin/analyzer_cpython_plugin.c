@@ -98,12 +98,54 @@ namespace ana
     void
     kf_PyList_Append::impl_call_pre(const call_details &cd) const
     {
-        // TODO: add check that op is pylisttype
-        // TODO: check newitem is not null
+        /*
+        do check for null and type here. if fail, terminate path.
+        then in impl_call_post — do three paths w.r.t realloc
+        three paths include 1) failure, 2) success w inplace 3) success w new buffer
+        success ones have to do py_incref etc afterwards; try to modularize as much as possible
+        */
+        //cd.ctxt()->terminate_path()
+        // to do: a lot more checks here
 
-        // get len
-        // get allocated
-        
+        region_model_manager *mgr = cd.get_manager();
+        region_model *model = cd.get_model();
+
+        const svalue *pylist_sval = cd.get_arg_svalue(0);
+        const region *pylist_reg = model->deref_rvalue(pylist_sval,
+                                                       cd.get_arg_tree(0),
+                                                       cd.get_ctxt());
+
+        const svalue *newitem_sval = cd.get_arg_svalue(1);
+        const region *newitem_reg = model->deref_rvalue(pylist_sval,
+                                                       cd.get_arg_tree(0),
+                                                       cd.get_ctxt());
+
+        tree varobj_field = get_field_by_name(pylistobj_tree, "ob_base");
+        const region *varobj_region = mgr->get_field_region(pylist_reg, varobj_field);
+
+        // PyList_GET_SIZE AKA Get size of list
+        tree size_field = get_field_by_name(varobj_tree, "ob_size");
+        const region *size_region = mgr->get_field_region(varobj_region, size_field);
+        const svalue *size_sval = model->get_store_value(size_region, cd.get_ctxt());
+
+        /*TODO: list_resize; how much to model? */
+        // Py_SET_SIZE(self, n + 1) AKA Increment size of list
+        // const svalue *one_sval = mgr->get_or_create_int_cst(size_type_node, 1);
+        // const svalue *new_size_sval = mgr->get_or_create_binop(size_type_node, PLUS_EXPR, size_sval, one_sval);
+        // model->set_value(size_region, new_size_sval, cd.get_ctxt());
+
+        // Py_INCREF(v)
+        // tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+        // const region *ob_refcnt_region = mgr->get_field_region(newitem_reg, ob_refcnt_tree);
+        // const svalue *ob_refcnt_sval = model->get_store_value(ob_refcnt_region, cd.get_ctxt());
+        // const svalue *new_ob_refcnt_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, ob_refcnt_sval, one_sval);
+        // model->set_value(ob_refcnt_region, new_ob_refcnt_sval, cd.get_ctxt());
+
+        // // PyList_SET_ITEM AKA ob_item[i] = (v)
+        // tree ob_item_field = get_field_by_name(pylistobj_tree, "ob_item");
+        // const region *ob_item_region = mgr->get_field_region(pylist_region, ob_item_field);
+        // const region *new_item_region = mgr->get_element_region(ob_item_region, ob_item_field, size_sval);
+        // model->set_value(new_item_region, newitem_sval, cd.get_ctxt());
     }
 
     class kf_PyList_New : public known_function
@@ -476,6 +518,8 @@ namespace ana
                                        make_unique<kf_Py_Dealloc>());
         iface->register_known_function("PyList_New",
                                        make_unique<kf_PyList_New>());
+        iface->register_known_function("PyList_Append",
+                                       make_unique<kf_PyList_Append>());
     }
 } //ana namespace
 

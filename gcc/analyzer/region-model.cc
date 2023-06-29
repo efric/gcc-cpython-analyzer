@@ -4686,10 +4686,10 @@ void region_model::check_pyobj_refcnt(const svalue *retval, region_model_context
   Then check refcnt != 0
   */
  
-  for (const auto &store : m_store)
+  for (const auto &cluster : m_store)
   {
       inform(UNKNOWN_LOCATION, "in iteration");
-      const region* base_reg = store.first;
+      const region* base_reg = cluster.first;
       base_reg->dump(false);
 
       // Get the type of the svalue associated with this region
@@ -4749,6 +4749,16 @@ void region_model::check_pyobj_refcnt(const svalue *retval, region_model_context
 
       // check ref count here comparing actual reference count vs ob_refcnt
       // how to count actual reference count:
+      // be careful of temporaries -- check it out 
+      // the one we're looking at in this iteration: base_reg
+      // for other_cluster : m_store:
+      //   ...
+      //     for k, v : other_cluster
+      //       // if v is a region_svalue pointing at base_reg:
+      //         // more checks
+      //       if  v->maybe_get_region()->base_region... == base_region
+      //           actual_refcnt++
+
       // 
       // visitor subclass
       // constant value + in the future add symbolic value support of refcnt
