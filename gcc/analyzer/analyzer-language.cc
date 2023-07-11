@@ -104,7 +104,7 @@ maybe_stash_global_var(logger *logger,
     tree id = get_identifier(name);
     if (tree t = tu.lookup_global_var_by_id(id))
     {
-      gcc_assert (TREE_CODE (t) == RECORD_TYPE);
+      // gcc_assert (TREE_CODE (t) == RECORD_TYPE);
       analyzer_stashed_globals->put (id, t);
       if (logger)
       {
@@ -226,7 +226,7 @@ get_stashed_global_var_by_name (const char *name)
   tree id = get_identifier (name);
   if (tree *slot = analyzer_stashed_globals->get (id))
     {
-      gcc_assert (TREE_CODE (*slot) == RECORD_TYPE);
+      // gcc_assert (TREE_CODE (*slot) == RECORD_TYPE);
       return *slot;
     }
   return NULL_TREE;

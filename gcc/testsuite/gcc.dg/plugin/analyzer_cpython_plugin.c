@@ -52,12 +52,12 @@ int plugin_is_GPL_compatible;
 // TODO**: format in GNU coding standards
 namespace ana
 {
-    static tree pyobj_tree = NULL_TREE;
-    static tree varobj_tree = NULL_TREE;
-    static tree pylistobj_tree = NULL_TREE;
-    static tree pylongobj_tree = NULL_TREE;
-    static tree pylongtype_tree = NULL_TREE;
-    static tree pylisttype_tree = NULL_TREE;
+    static tree pyobj_record = NULL_TREE;
+    static tree varobj_record = NULL_TREE;
+    static tree pylistobj_record = NULL_TREE;
+    static tree pylongobj_record = NULL_TREE;
+    static tree pylongtype_vardecl = NULL_TREE;
+    static tree pylisttype_vardecl = NULL_TREE;
 
     // maybe there is one that already exists in region.cc or region_model.cc?
     const svalue *get_type_size_in_bytes(tree type, region_model_manager *mgr)
@@ -79,7 +79,7 @@ namespace ana
 
     const svalue *get_sizeof_pyobjptr(region_model_manager *mgr)
     {
-        tree pyobj_ptr_tree = build_pointer_type(pyobj_tree);
+        tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
         tree size_tree = TYPE_SIZE_UNIT(pyobj_ptr_tree);
         const svalue *sizeof_sval = mgr->get_or_create_constant_svalue(size_tree);
         return sizeof_sval;
@@ -107,6 +107,12 @@ namespace ana
         //cd.ctxt()->terminate_path()
         // to do: a lot more checks here
 
+        // check for type:
+        // alternatively -- include definition e.g python.h for plugin?
+//            flags = type->tp_flags;
+//#endif
+//    return ((flags & feature) != 0);
+//
         region_model_manager *mgr = cd.get_manager();
         region_model *model = cd.get_model();
 
@@ -120,13 +126,59 @@ namespace ana
                                                        cd.get_arg_tree(0),
                                                        cd.get_ctxt());
 
-        tree varobj_field = get_field_by_name(pylistobj_tree, "ob_base");
-        const region *varobj_region = mgr->get_field_region(pylist_reg, varobj_field);
+        // PyList_Check
+        tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
+        const region *ob_type_region = mgr->get_field_region(pylist_reg, ob_type_field);
+        const svalue *stored_sval = model->get_store_value(ob_type_region, cd.get_ctxt());
+        const region *pylist_type_region = mgr->get_region_for_global(pylisttype_vardecl);
+        const svalue *pylist_type_ptr = mgr->get_ptr_svalue(TREE_TYPE(pylisttype_vardecl), pylist_type_region);
 
-        // PyList_GET_SIZE AKA Get size of list
-        tree size_field = get_field_by_name(varobj_tree, "ob_size");
-        const region *size_region = mgr->get_field_region(varobj_region, size_field);
-        const svalue *size_sval = model->get_store_value(size_region, cd.get_ctxt());
+        const unaryop_svalue *unwrapped_sval = stored_sval->dyn_cast_unaryop_svalue();
+        if (!unwrapped_sval || unwrapped_sval->get_arg() != pylist_type_ptr)
+        {
+            // emit diagnostic -Wanalyzer-type-error
+            cd.get_ctxt()->terminate_path();
+            return;
+        } 
+        inform(input_location, "got here");
+
+        // scribbles for type checking via the actual bit instead
+        // tree tp_flags_field = get_field_by_name(TREE_TYPE(pylisttype_vardecl), "tp_flags");
+        // const region *tp_flags_region = mgr->get_field_region(pylist_type_reg, tp_flags_field);
+        // const svalue *tp_flags_sval = model->get_store_value(tp_flags_region, cd.get_ctxt());
+        // const svalue *flag_sval = mgr->get_or_create_int_cst(integer_type_node, Py_TPFLAGS_LIST_SUBCLASS);
+        // const svalue *flag2_sval = mgr->get_or_create_int_cst(integer_type_node, Py_TPFLAGS_LONG_SUBCLASS);
+        // const svalue *result_sval = mgr->get_or_create_binop(integer_type_node, BIT_AND_EXPR, tp_flags_sval, flag_sval);
+        // const svalue *result2_sval = mgr->get_or_create_binop(integer_type_node, BIT_AND_EXPR, tp_flags_sval, flag2_sval);
+
+        // if (tree_int_cst_equal(result_sval->maybe_get_constant(), integer_zero_node))
+        // {
+        //     inform(input_location, "not a list");
+        //     // emit diagnostic here
+        //     // cd.get_ctxt()->terminate_path();
+        // } else {
+        //     inform(input_location, "noho");
+        // }
+
+        // Check that new_item is not null
+        {
+            const svalue *null_ptr = mgr->get_or_create_int_cst(newitem_sval->get_type(), 0);
+            if (!model->add_constraint(newitem_sval, NE_EXPR, null_ptr,
+                                       cd.get_ctxt()))
+            {
+                // emit diagnostic here
+                cd.get_ctxt()->terminate_path();
+                return;
+            }
+        }
+
+        // tree varobj_field = get_field_by_name(pylistobj_record, "ob_base");
+        // const region *varobj_region = mgr->get_field_region(pylist_reg, varobj_field);
+
+        // // PyList_GET_SIZE AKA Get size of list
+        // tree size_field = get_field_by_name(varobj_record, "ob_size");
+        // const region *size_region = mgr->get_field_region(varobj_region, size_field);
+        // const svalue *size_sval = model->get_store_value(size_region, cd.get_ctxt());
 
         /*TODO: list_resize; how much to model? */
         // Py_SET_SIZE(self, n + 1) AKA Increment size of list
@@ -135,14 +187,14 @@ namespace ana
         // model->set_value(size_region, new_size_sval, cd.get_ctxt());
 
         // Py_INCREF(v)
-        // tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+        // tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
         // const region *ob_refcnt_region = mgr->get_field_region(newitem_reg, ob_refcnt_tree);
         // const svalue *ob_refcnt_sval = model->get_store_value(ob_refcnt_region, cd.get_ctxt());
         // const svalue *new_ob_refcnt_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, ob_refcnt_sval, one_sval);
         // model->set_value(ob_refcnt_region, new_ob_refcnt_sval, cd.get_ctxt());
 
         // // PyList_SET_ITEM AKA ob_item[i] = (v)
-        // tree ob_item_field = get_field_by_name(pylistobj_tree, "ob_item");
+        // tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
         // const region *ob_item_region = mgr->get_field_region(pylist_region, ob_item_field);
         // const region *new_item_region = mgr->get_element_region(ob_item_region, ob_item_field, size_sval);
         // model->set_value(new_item_region, newitem_sval, cd.get_ctxt());
@@ -209,23 +261,24 @@ namespace ana
                 const call_details cd(get_call_details(model, ctxt));
                 region_model_manager *mgr = cd.get_manager();
 
-                const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_tree);
-                const svalue *varobj_svalue = mgr->get_or_create_unknown_svalue(varobj_tree);
-                const svalue *pylist_svalue = mgr->get_or_create_unknown_svalue(pylistobj_tree);
+                const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_record);
+                const svalue *varobj_svalue = mgr->get_or_create_unknown_svalue(varobj_record);
+                const svalue *pylist_svalue = mgr->get_or_create_unknown_svalue(pylistobj_record);
 
                 const svalue *size_sval = cd.get_arg_svalue(0);
 
                 // create region for pylist
-                const region *pylist_region = model->get_or_create_region_for_heap_alloc(NULL, cd.get_ctxt());
+                 const svalue *tp_basicsize_sval = mgr->get_or_create_unknown_svalue(NULL);
+                const region *pylist_region = model->get_or_create_region_for_heap_alloc(tp_basicsize_sval, cd.get_ctxt());
                 model->set_value(pylist_region, pylist_svalue, cd.get_ctxt());
 
                 //#define PyObject_VAR_HEAD      PyVarObject ob_base;
-                tree varobj_field = get_field_by_name(pylistobj_tree, "ob_base");
+                tree varobj_field = get_field_by_name(pylistobj_record, "ob_base");
                 const region *varobj_region = mgr->get_field_region(pylist_region, varobj_field);
                 model->set_value(varobj_region, varobj_svalue, cd.get_ctxt());
 
                 // PyObject **ob_item;
-                tree ob_item_field = get_field_by_name(pylistobj_tree, "ob_item");
+                tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
                 const region *ob_item_region = mgr->get_field_region(pylist_region, ob_item_field);
 
                 const svalue *zero_sval = mgr->get_or_create_int_cst(size_type_node, 0);
@@ -238,7 +291,7 @@ namespace ana
 
                 if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node)) 
                 {
-                    tree pyobj_ptr_tree = build_pointer_type(pyobj_tree);
+                    tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
                     tree pyobject_ptr_ptr_tree = build_pointer_type(pyobj_ptr_tree);
                     const svalue *null_sval = mgr->get_or_create_null_ptr(pyobject_ptr_ptr_tree);
                     model->set_value(ob_item_region, null_sval, cd.get_ctxt());
@@ -260,11 +313,11 @@ namespace ana
                 Py_ssize_t ob_size; // Number of items in variable part 
                 } PyVarObject;
                 */
-                tree ob_base_tree = get_field_by_name(varobj_tree, "ob_base");
+                tree ob_base_tree = get_field_by_name(varobj_record, "ob_base");
                 const region *ob_base_region = mgr->get_field_region(varobj_region, ob_base_tree);
                 model->set_value(ob_base_region, pyobj_svalue, cd.get_ctxt());
                 
-                tree ob_size_tree = get_field_by_name(varobj_tree, "ob_size");
+                tree ob_size_tree = get_field_by_name(varobj_record, "ob_size");
                 const region *ob_size_region = mgr->get_field_region(varobj_region, ob_size_tree);
                 model->set_value(ob_size_region, size_sval, cd.get_ctxt());
 
@@ -276,15 +329,17 @@ namespace ana
                 } PyObject;
                 */
 
-                tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+                tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(ob_base_region, ob_refcnt_tree);
                 const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1); //TODO: switch to Py_ssize_t
                 model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
 
-                tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
+                // get pointer svalue for PyList_Type then assign it to ob_type field.
+                const region *pylist_type_region = mgr->get_region_for_global(pylisttype_vardecl);
+                const svalue *pylist_type_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(pylisttype_vardecl), pylist_type_region);
+                tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
                 const region *ob_type_region = mgr->get_field_region(ob_base_region, ob_type_field);
-                const svalue *type_svalue = mgr->get_or_create_unknown_svalue(TREE_TYPE(ob_type_field)); //TODO: switch to actual
-                model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
+                model->set_value(ob_type_region, pylist_type_ptr_sval, cd.get_ctxt());
 
                 if (cd.get_lhs_type())
                 {
@@ -361,62 +416,43 @@ namespace ana
                               const exploded_edge *,
                               region_model_context *ctxt) const final override
             {
-                // const call_details cd(get_call_details(model, ctxt));
-                // region_model_manager *mgr = cd.get_manager();
-                // const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_tree);
-
-                // const region *new_pyobj_region = model->get_or_create_region_for_heap_alloc(NULL, cd.get_ctxt());
-                // model->set_value(new_pyobj_region, pyobj_svalue, cd.get_ctxt());
-
-                // tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
-                // const region *ob_refcnt_region = mgr->get_field_region(new_pyobj_region, ob_refcnt_tree);
-                // const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
-                // model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
-
-                // // TODO: this should really be look up global var by name and set it to pointer of that
-                // // so keep that in mind
-                // tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
-                // const region *ob_type_region = mgr->get_field_region(new_pyobj_region, ob_type_field);
-                // const svalue *type_svalue = mgr->get_or_create_unknown_svalue(ob_type_field);
-                // model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
-
-                // if (cd.get_lhs_type())
-                // {
-                //     const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pyobj_region);
-                //     cd.maybe_set_lhs(ptr_sval);
-                // }
-                // return true;
-
-
-
                 const call_details cd(get_call_details(model, ctxt));
                 region_model_manager *mgr = cd.get_manager();
 
-                const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_tree);
-                const svalue *pylong_svalue = mgr->get_or_create_unknown_svalue(pylongobj_tree);
+                const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_record);
+                const svalue *pylong_svalue = mgr->get_or_create_unknown_svalue(pylongobj_record);
 
-                // Create a new region for PyLongObject.
-                const region *new_pylong_region = model->get_or_create_region_for_heap_alloc(NULL, cd.get_ctxt());
+                // // Create a new region for PyLongObject.
+                // tree tp_basicsize_field = get_field_by_name(pylongtype_vardecl, "tp_basicsize");
+                // tree comp_ref = build3(COMPONENT_REF, TREE_TYPE(tp_basicsize_field), 
+                //        pylongtype_vardecl, tp_basicsize_field, NULL_TREE);
+                // const svalue *tp_basicsize_sval = model->get_rvalue(comp_ref, ctxt);
+
+                // tree tp_basicsize_field = get_field_by_name(pylongtype_vardecl, "tp_basicsize");
+                const svalue *tp_basicsize_sval = mgr->get_or_create_unknown_svalue(NULL);
+                const region *new_pylong_region = model->get_or_create_region_for_heap_alloc(tp_basicsize_sval, cd.get_ctxt());
                 model->set_value(new_pylong_region, pylong_svalue, cd.get_ctxt());
 
                 // Create a region for the base PyObject within the PyLongObject.
-                tree ob_base_tree = get_field_by_name(pylongobj_tree, "ob_base");
+                tree ob_base_tree = get_field_by_name(pylongobj_record, "ob_base");
                 const region *ob_base_region = mgr->get_field_region(new_pylong_region, ob_base_tree);
                 model->set_value(ob_base_region, pyobj_svalue, cd.get_ctxt());
 
-                tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+                tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(ob_base_region, ob_refcnt_tree);
                 // after u do stash global variabvles, change this to pyssize
                 const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
                 model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
 
-                tree ob_type_field = get_field_by_name(pyobj_tree, "ob_type");
+                // get pointer svalue for PyLong_Type then assign it to ob_type field.
+                const region *pylong_type_region = mgr->get_region_for_global(pylongtype_vardecl);
+                const svalue *pylong_type_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(pylongtype_vardecl), pylong_type_region);
+                tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
                 const region *ob_type_region = mgr->get_field_region(ob_base_region, ob_type_field);
-                const svalue *type_svalue = mgr->get_or_create_unknown_svalue(TREE_TYPE(ob_type_field));
-                model->set_value(ob_type_region, type_svalue, cd.get_ctxt());
+                model->set_value(ob_type_region, pylong_type_ptr_sval, cd.get_ctxt());
 
                 // Set the PyLongObject value.
-                tree ob_digit_field = get_field_by_name(pylongobj_tree, "ob_digit");
+                tree ob_digit_field = get_field_by_name(pylongobj_record, "ob_digit");
                 const region *ob_digit_region = mgr->get_field_region(new_pylong_region, ob_digit_field);
                 const svalue *ob_digit_sval = cd.get_arg_svalue(0);
                 model->set_value(ob_digit_region, ob_digit_sval, cd.get_ctxt());
@@ -461,7 +497,7 @@ namespace ana
         if (!pyobj_reg)
             return;
 
-        tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+        tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
         const region *ob_refcnt_region = mgr->get_field_region(pyobj_reg, ob_refcnt_tree);
         const svalue *ob_refcnt_sval = model->get_store_value(ob_refcnt_region, cd.get_ctxt());
 
@@ -484,18 +520,18 @@ namespace ana
 
     static void initialize_globals()
     {
-        if (pyobj_tree == NULL_TREE)
-            pyobj_tree = get_stashed_type_by_name("PyObject");
-        if (varobj_tree == NULL_TREE)
-            varobj_tree = get_stashed_type_by_name("PyVarObject");
-        if (pylistobj_tree == NULL_TREE)
-            pylistobj_tree = get_stashed_type_by_name("PyListObject");
-        if (pylongobj_tree == NULL_TREE)
-            pylongobj_tree = get_stashed_type_by_name("PyLongObject");
-        if (pylongtype_tree == NULL_TREE)
-            pylongtype_tree = get_stashed_global_var_by_name("PyLong_Type");
-        if (pylisttype_tree == NULL_TREE)
-            pylisttype_tree = get_stashed_global_var_by_name("PyList_Type");
+        if (pyobj_record == NULL_TREE)
+            pyobj_record = get_stashed_type_by_name("PyObject");
+        if (varobj_record == NULL_TREE)
+            varobj_record = get_stashed_type_by_name("PyVarObject");
+        if (pylistobj_record == NULL_TREE)
+            pylistobj_record = get_stashed_type_by_name("PyListObject");
+        if (pylongobj_record == NULL_TREE)
+            pylongobj_record = get_stashed_type_by_name("PyLongObject");
+        if (pylongtype_vardecl == NULL_TREE)
+            pylongtype_vardecl = get_stashed_global_var_by_name("PyLong_Type");
+        if (pylisttype_vardecl == NULL_TREE)
+            pylisttype_vardecl = get_stashed_global_var_by_name("PyList_Type");
     }
 
     static void
@@ -508,7 +544,7 @@ namespace ana
         
         initialize_globals();
         // if e.g PyObject not found, don't bother registering known functions ***
-        if (pyobj_tree == NULL_TREE)
+        if (pyobj_record == NULL_TREE)
             return;
         iface->register_known_function("PyLong_FromLong",
                                        make_unique<kf_PyLong_FromLong>());
