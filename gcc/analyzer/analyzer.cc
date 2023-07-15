@@ -493,7 +493,7 @@ tree get_field_by_name(tree type, const char *name)
   const char *field_name = IDENTIFIER_POINTER(DECL_NAME(field));
   if (strcmp(field_name, name) == 0)
   {
-  inform(input_location, "found field: %s\n", name);
+  // inform(input_location, "found field: %s\n", name);
   // check the name here
   return field;
   }

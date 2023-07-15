@@ -92,7 +92,7 @@ namespace ana
         {
             return (cd.num_args() == 2); // TODO: more checks here
         }
-        void impl_call_pre(const call_details &) const final override;
+        void impl_call_pre(const call_details &cd) const final override;
         void impl_call_post(const call_details &cd) const final override;
     };
 
@@ -115,8 +115,8 @@ namespace ana
 
         const svalue *newitem_sval = cd.get_arg_svalue(1);
         const region *newitem_reg = model->deref_rvalue(pylist_sval,
-                                                       cd.get_arg_tree(0),
-                                                       cd.get_ctxt());
+                                                        cd.get_arg_tree(0),
+                                                        cd.get_ctxt());
 
         // PyList_Check
         tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
@@ -131,8 +131,7 @@ namespace ana
             // emit diagnostic -Wanalyzer-type-error
             cd.get_ctxt()->terminate_path();
             return;
-        } 
-        inform(input_location, "got here");
+        }
 
         // Check that new_item is not null
         {
@@ -208,19 +207,14 @@ namespace ana
                 const svalue *null_sval = mgr->get_or_create_int_cst(ob_item_region->get_type(), 0);
                 model->set_value(ob_item_region, null_sval, ctxt);
 
-                /* TODO: Emit diagnostic. */
-
-                /* Terminate the path. */
-                // cd.terminate_path();
-
-                return false; // Indicate that this path cannot be explored further.
+                return true;
             }
         };
 
-        class append_realloc_success : public call_info
+        class realloc_success_no_move : public call_info
         {
         public:
-            append_realloc_success(const call_details &cd)
+            realloc_success_no_move(const call_details &cd)
                 : call_info(cd)
             {
             }
@@ -228,27 +222,8 @@ namespace ana
             label_text get_desc(bool can_colorize) const final override
             {
                 return make_label_text(can_colorize,
-                                       "when %qE succeeds",
+                                       "when %qE succeeds, without moving underlying buffer",
                                        get_fndecl());
-            }
-
-        // protected:
-            // void set_ob_item(region_model_manager *mgr, region_model *model, const svalue *pylist_sval, const svalue *new_sval, region_model_context *ctxt) const
-            // {
-            //     const region *pylist_reg = model->deref_rvalue(pylist_sval, cd.get_arg_tree(0), cd.get_ctxt());
-
-            //     tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
-            //     const region *ob_item_region = mgr->get_field_region(pylist_region, ob_item_field);
-            //     model->set_value(ob_item_region, new_sval, ctxt);
-            // }
-        };
-
-        class realloc_success_no_move : public append_realloc_success
-        {
-        public:
-            realloc_success_no_move(const call_details &cd)
-                : append_realloc_success(cd)
-            {
             }
 
             bool update_model(region_model *model, const exploded_edge *, region_model_context *ctxt) const final override
@@ -264,39 +239,134 @@ namespace ana
                 const svalue *ob_size_sval = model->get_store_value(ob_size_region, cd.get_ctxt());
                 const svalue *one_sval = mgr->get_or_create_int_cst(integer_type_node, 1);
                 const svalue *new_size_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, ob_size_sval, one_sval);
-                model->set_value(ob_size_region, new_size_sval, ctxt);
 
                 const svalue *sizeof_sval = mgr->get_or_create_cast(ob_size_sval->get_type(), get_sizeof_pyobjptr(mgr));
                 const svalue *num_allocated_bytes = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
-                                                                   sizeof_sval, new_size_sval);
+                                                                             sizeof_sval, new_size_sval);
+
+                tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
+                const region *ob_item_region = mgr->get_field_region(pylist_reg, ob_item_field);
+                const svalue *ob_item_ptr_sval = model->get_store_value(ob_item_region, cd.get_ctxt());
+
                 /* We can only grow in place with a non-NULL pointer.  */
                 {
-                    const svalue *null_ptr = mgr->get_or_create_int_cst(pylist_sval->get_type(), 0);
-                    if (!model->add_constraint(pylist_sval, NE_EXPR, null_ptr, cd.get_ctxt()))
+                    const svalue *null_ptr = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
+                    if (!model->add_constraint(ob_item_ptr_sval, NE_EXPR, null_ptr, cd.get_ctxt()))
+                    {
                         return false;
+                    }
                 }
 
-                if (const region *buffer_reg = model->deref_rvalue(pylist_sval, NULL_TREE, ctxt))
-                {
-                    if (compat_types_p(num_allocated_bytes->get_type(), size_type_node))
-                        model->set_dynamic_extents(buffer_reg, num_allocated_bytes, ctxt);
+                // realloc no move
+                if (compat_types_p(num_allocated_bytes->get_type(), size_type_node))
+                    model->set_dynamic_extents(ob_item_region, num_allocated_bytes, ctxt);
 
-                    tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
-                    const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(ob_item_field), buffer_reg);
-                    const region *ob_item_region = mgr->get_field_region(pylist_reg, ob_item_field);
-                    model->set_value(ob_item_region, ob_item_ptr_sval, ctxt);
-                }
-
+                model->set_value(ob_size_region, new_size_sval, ctxt);
+                // model->set_value(ob_item_region, ob_item_ptr_sval, cd.get_ctxt());
                 return true;
+            }
+        };
+
+        class realloc_success_move : public call_info
+        {
+        public:
+            realloc_success_move(const call_details &cd)
+                : call_info(cd)
+            {
+            }
+
+            label_text get_desc(bool can_colorize) const final override
+            {
+                return make_label_text(can_colorize,
+                                       "when %qE succeeds, moving buffer",
+                                       get_fndecl());
+            }
+
+            bool update_model(region_model *model,
+                              const exploded_edge *,
+                              region_model_context *ctxt) const final override
+            {
+                const call_details cd(get_call_details(model, ctxt));
+                region_model_manager *mgr = cd.get_manager();
+                const svalue *pylist_sval = cd.get_arg_svalue(0);
+                const region *pylist_reg = model->deref_rvalue(pylist_sval, cd.get_arg_tree(0), cd.get_ctxt());
+
+                tree ob_size_field = get_field_by_name(varobj_record, "ob_size");
+                const region *ob_size_region = mgr->get_field_region(pylist_reg, ob_size_field);
+                const svalue *old_size_sval = model->get_store_value(ob_size_region, cd.get_ctxt());
+                const svalue *one_sval = mgr->get_or_create_int_cst(integer_type_node, 1);
+                const svalue *new_size_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, old_size_sval, one_sval);
+
+                tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
+                const region *old_reg = mgr->get_field_region(pylist_reg, ob_item_field);
+                const svalue *old_ptr_sval = model->get_store_value(old_reg, cd.get_ctxt());
+
+                /* Create the new region.  */
+                const svalue *sizeof_sval = mgr->get_or_create_cast(old_size_sval->get_type(), get_sizeof_pyobjptr(mgr));
+                const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
+                                                                   sizeof_sval, new_size_sval);
+                const region *new_reg = mgr->get_sized_region(old_reg, NULL_TREE, prod_sval);
+                const svalue *new_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(ob_item_field), new_reg);
+                if (!model->add_constraint(new_ptr_sval, NE_EXPR, old_ptr_sval,
+                                           cd.get_ctxt()))
+                    return false;
+                
+                model->set_value(old_reg, new_ptr_sval, cd.get_ctxt());
+
+                // if (old_size_sval) {
+                //     // need to make this prod
+                //     const svalue *copied_size_sval = get_copied_size(model, old_size_sval, prod_sval);
+                //      tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
+                //     const region *copied_old_reg = mgr->get_sized_region(pylist_reg, pyobj_ptr_tree, copied_size_sval);
+                //     const svalue *buffer_content_sval = model->get_store_value(copied_old_reg, cd.get_ctxt());
+                //     const region *copied_new_reg = mgr->get_sized_region(new_reg, NULL, copied_size_sval);
+                //     model->set_value(copied_new_reg, buffer_content_sval,
+                //                      cd.get_ctxt());
+                // } else {
+                //     model->mark_region_as_unknown(new_reg, cd.get_uncertainty());
+                // }
+
+                // model->unbind_region_and_descendents(old_reg, POISON_KIND_FREED);
+                // model->unset_dynamic_extents(old_reg);
+                
+                // // model->on_realloc_with_move(cd, old_ptr_sval, new_ptr_sval);
+
+                // const svalue *null_ptr = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
+                // if (!model->add_constraint(new_ptr_sval, NE_EXPR, null_ptr,
+                //                            cd.get_ctxt()))
+                //     return false;
+
+                // model->set_value(ob_size_region, new_size_sval, ctxt);
+                return true;
+            }
+
+        private:
+            /* Return the lesser of OLD_SIZE_SVAL and NEW_SIZE_SVAL.
+               If unknown, OLD_SIZE_SVAL is returned.  */
+            const svalue *get_copied_size(region_model *model,
+                                          const svalue *old_size_sval,
+                                          const svalue *new_size_sval) const
+            {
+                tristate res = model->eval_condition(old_size_sval, GT_EXPR, new_size_sval);
+                switch (res.get_value())
+                {
+                case tristate::TS_TRUE:
+                    return new_size_sval;
+                case tristate::TS_FALSE:
+                case tristate::TS_UNKNOWN:
+                    return old_size_sval;
+                default:
+                    gcc_unreachable();
+                }
             }
         };
 
         /* Body of kf_PyList_Append::impl_call_post.  */
         if (cd.get_ctxt())
         {
-            cd.get_ctxt()->bifurcate(make_unique<append_realloc_failure>(cd));
-            cd.get_ctxt()->bifurcate(make_unique<realloc_success_no_move>(cd));
-            // cd.get_ctxt()->bifurcate(make_unique<success_with_move>(cd));
+            // cd.get_ctxt()->bifurcate(make_unique<append_realloc_failure>(cd));
+            // cd.get_ctxt()->bifurcate(make_unique<realloc_success_no_move>(cd));
+            cd.get_ctxt()->bifurcate(make_unique<realloc_success_move>(cd));
             cd.get_ctxt()->terminate_path();
         }
     }
@@ -340,10 +410,10 @@ namespace ana
             }
         };
 
-        class success : public call_info
+        class success_ : public call_info
         {
         public:
-            success(const call_details &cd)
+            success_(const call_details &cd)
                 : call_info(cd)
             {
             }
@@ -369,11 +439,11 @@ namespace ana
                 const svalue *size_sval = cd.get_arg_svalue(0);
 
                 // create region for pylist
-                 const svalue *tp_basicsize_sval = mgr->get_or_create_unknown_svalue(NULL);
+                const svalue *tp_basicsize_sval = mgr->get_or_create_unknown_svalue(NULL);
                 const region *pylist_region = model->get_or_create_region_for_heap_alloc(tp_basicsize_sval, cd.get_ctxt());
                 model->set_value(pylist_region, pylist_svalue, cd.get_ctxt());
 
-                //#define PyObject_VAR_HEAD      PyVarObject ob_base;
+                // #define PyObject_VAR_HEAD      PyVarObject ob_base;
                 tree varobj_field = get_field_by_name(pylistobj_record, "ob_base");
                 const region *varobj_region = mgr->get_field_region(pylist_region, varobj_field);
                 model->set_value(varobj_region, varobj_svalue, cd.get_ctxt());
@@ -390,19 +460,18 @@ namespace ana
                 // maybe_get_constant might return NULL_TREE which will then not give us right result
                 // TODO: add some extra check here
 
-                if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node)) 
+                if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node))
                 {
-                    tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
-                    tree pyobject_ptr_ptr_tree = build_pointer_type(pyobj_ptr_tree);
-                    const svalue *null_sval = mgr->get_or_create_null_ptr(pyobject_ptr_ptr_tree);
+                    const svalue *null_sval = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
                     model->set_value(ob_item_region, null_sval, cd.get_ctxt());
                 }
-                else //calloc
+                else // calloc
                 {
                     const svalue *sizeof_sval = mgr->get_or_create_cast(size_sval->get_type(), get_sizeof_pyobjptr(mgr));
                     const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
                                                                        sizeof_sval, size_sval);
-                    const region *ob_item_sized_region = mgr->get_sized_region(ob_item_region, NULL_TREE, prod_sval);
+                    tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
+                    const region *ob_item_sized_region = mgr->get_sized_region(pylist_region, pyobj_ptr_tree, prod_sval);
                     model->zero_fill_region(ob_item_sized_region);
                     const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(ob_item_field), ob_item_sized_region);
                     model->set_value(ob_item_region, ob_item_ptr_sval, cd.get_ctxt());
@@ -411,13 +480,13 @@ namespace ana
                 /*
                 typedef struct {
                 PyObject ob_base;
-                Py_ssize_t ob_size; // Number of items in variable part 
+                Py_ssize_t ob_size; // Number of items in variable part
                 } PyVarObject;
                 */
                 tree ob_base_tree = get_field_by_name(varobj_record, "ob_base");
                 const region *ob_base_region = mgr->get_field_region(varobj_region, ob_base_tree);
                 model->set_value(ob_base_region, pyobj_svalue, cd.get_ctxt());
-                
+
                 tree ob_size_tree = get_field_by_name(varobj_record, "ob_size");
                 const region *ob_size_region = mgr->get_field_region(varobj_region, ob_size_tree);
                 model->set_value(ob_size_region, size_sval, cd.get_ctxt());
@@ -436,7 +505,7 @@ namespace ana
 
                 tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(ob_base_region, ob_refcnt_tree);
-                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1); //TODO: switch to Py_ssize_t
+                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1); // TODO: switch to Py_ssize_t
                 model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
 
                 // get pointer svalue for PyList_Type then assign it to ob_type field.
@@ -458,7 +527,7 @@ namespace ana
         if (cd.get_ctxt())
         {
             cd.get_ctxt()->bifurcate(make_unique<failure>(cd));
-            cd.get_ctxt()->bifurcate(make_unique<success>(cd));
+            cd.get_ctxt()->bifurcate(make_unique<success_>(cd));
             cd.get_ctxt()->terminate_path();
         }
     }
@@ -529,7 +598,7 @@ namespace ana
 
                 // // Create a new region for PyLongObject.
                 // tree tp_basicsize_field = get_field_by_name(pylongtype_vardecl, "tp_basicsize");
-                // tree comp_ref = build3(COMPONENT_REF, TREE_TYPE(tp_basicsize_field), 
+                // tree comp_ref = build3(COMPONENT_REF, TREE_TYPE(tp_basicsize_field),
                 //        pylongtype_vardecl, tp_basicsize_field, NULL_TREE);
                 // const svalue *tp_basicsize_sval = model->get_rvalue(comp_ref, ctxt);
 
@@ -646,7 +715,7 @@ namespace ana
         LOG_SCOPE(iface->get_logger());
         if (1)
             inform(input_location, "got here: cpython_analyzer_init_cb");
-        
+
         initialize_globals();
         // if e.g PyObject not found, don't bother registering known functions ***
         if (pyobj_record == NULL_TREE)
@@ -662,7 +731,7 @@ namespace ana
         iface->register_known_function("PyList_Append",
                                        make_unique<kf_PyList_Append>());
     }
-} //ana namespace
+} // ana namespace
 
 #endif /* #if ENABLE_ANALYZER */
 
