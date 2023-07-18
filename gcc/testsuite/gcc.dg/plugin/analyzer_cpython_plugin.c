@@ -58,9 +58,12 @@ namespace ana
     static tree pylongobj_record = NULL_TREE;
     static tree pylongtype_vardecl = NULL_TREE;
     static tree pylisttype_vardecl = NULL_TREE;
+    // static tree pyobj_ptr_tree = NULL_TREE;
+    // static tree pyobj_ptr_ptr = NULL_TREE;
 
     // maybe there is one that already exists in region.cc or region_model.cc?
-    const svalue *get_type_size_in_bytes(tree type, region_model_manager *mgr)
+    const svalue *
+    get_type_size_in_bytes(tree type, region_model_manager *mgr)
     {
 
         tree type_size = TYPE_SIZE_UNIT(type);
@@ -228,6 +231,8 @@ namespace ana
 
             bool update_model(region_model *model, const exploded_edge *, region_model_context *ctxt) const final override
             {
+                tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
+                tree pyobj_ptr_ptr = build_pointer_type(pyobj_ptr_tree);
                 const call_details cd(get_call_details(model, ctxt));
                 region_model_manager *mgr = cd.get_manager();
 
@@ -247,22 +252,37 @@ namespace ana
                 tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
                 const region *ob_item_region = mgr->get_field_region(pylist_reg, ob_item_field);
                 const svalue *ob_item_ptr_sval = model->get_store_value(ob_item_region, cd.get_ctxt());
+                // const svalue *ob_item_ptr_sval = casted_old_ptr_sval->dyn_cast_unaryop_svalue()->get_arg();
 
                 /* We can only grow in place with a non-NULL pointer.  */
                 {
-                    const svalue *null_ptr = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
+                    const svalue *null_ptr = mgr->get_or_create_null_ptr(pyobj_ptr_ptr);
                     if (!model->add_constraint(ob_item_ptr_sval, NE_EXPR, null_ptr, cd.get_ctxt()))
                     {
                         return false;
                     }
                 }
 
+                const region *curr_item_region = ob_item_ptr_sval->dyn_cast_region_svalue()->get_pointee();
                 // realloc no move
                 if (compat_types_p(num_allocated_bytes->get_type(), size_type_node))
-                    model->set_dynamic_extents(ob_item_region, num_allocated_bytes, ctxt);
+                    model->set_dynamic_extents(curr_item_region, num_allocated_bytes, ctxt);
 
                 model->set_value(ob_size_region, new_size_sval, ctxt);
-                // model->set_value(ob_item_region, ob_item_ptr_sval, cd.get_ctxt());
+
+                tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
+                const region *ob_refcnt_region = mgr->get_field_region(pylist_reg, ob_refcnt_tree);
+                const svalue *curr_refcnt = model->get_store_value(ob_refcnt_region, cd.get_ctxt());
+                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
+                const svalue *new_refcnt_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
+                model->set_value(ob_refcnt_region, new_refcnt_sval, cd.get_ctxt());
+
+                const svalue *offset_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
+                                                                     sizeof_sval, ob_size_sval);
+                const region *element_region = mgr->get_offset_region(curr_item_region, pyobj_ptr_ptr, offset_sval);
+                const svalue *newitem_sval = cd.get_arg_svalue(1);
+                model->set_value(element_region, newitem_sval, cd.get_ctxt());
+
                 return true;
             }
         };
@@ -286,57 +306,89 @@ namespace ana
                               const exploded_edge *,
                               region_model_context *ctxt) const final override
             {
+                tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
+                tree pyobj_ptr_ptr = build_pointer_type(pyobj_ptr_tree);
                 const call_details cd(get_call_details(model, ctxt));
                 region_model_manager *mgr = cd.get_manager();
                 const svalue *pylist_sval = cd.get_arg_svalue(0);
                 const region *pylist_reg = model->deref_rvalue(pylist_sval, cd.get_arg_tree(0), cd.get_ctxt());
 
+
                 tree ob_size_field = get_field_by_name(varobj_record, "ob_size");
                 const region *ob_size_region = mgr->get_field_region(pylist_reg, ob_size_field);
-                const svalue *old_size_sval = model->get_store_value(ob_size_region, cd.get_ctxt());
+                const svalue *old_ob_size_sval = model->get_store_value(ob_size_region, cd.get_ctxt());
                 const svalue *one_sval = mgr->get_or_create_int_cst(integer_type_node, 1);
-                const svalue *new_size_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, old_size_sval, one_sval);
+                const svalue *new_ob_size_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, old_ob_size_sval, one_sval);
+                // const svalue *oldold_ob_size_sval = mgr->get_or_create_binop(integer_type_node, MINUS_EXPR, old_ob_size_sval, one_sval);
+
+                const svalue *sizeof_sval = mgr->get_or_create_cast(old_ob_size_sval->get_type(), get_sizeof_pyobjptr(mgr));
+                const svalue *new_size_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
+                                                                       sizeof_sval, new_ob_size_sval);
 
                 tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
-                const region *old_reg = mgr->get_field_region(pylist_reg, ob_item_field);
-                const svalue *old_ptr_sval = model->get_store_value(old_reg, cd.get_ctxt());
+                const region *ob_item_reg = mgr->get_field_region(pylist_reg, ob_item_field);
+                const svalue *old_ptr_sval = model->get_store_value(ob_item_reg, cd.get_ctxt());
+                // const svalue *old_ptr_sval = casted_old_ptr_sval->dyn_cast_unaryop_svalue()->get_arg();
 
                 /* Create the new region.  */
-                const svalue *sizeof_sval = mgr->get_or_create_cast(old_size_sval->get_type(), get_sizeof_pyobjptr(mgr));
-                const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
-                                                                   sizeof_sval, new_size_sval);
-                const region *new_reg = mgr->get_sized_region(old_reg, NULL_TREE, prod_sval);
-                const svalue *new_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(ob_item_field), new_reg);
+                const region *new_reg = model->get_or_create_region_for_heap_alloc(new_size_sval, cd.get_ctxt());
+                const svalue *new_ptr_sval = mgr->get_ptr_svalue(pyobj_ptr_ptr, new_reg);
                 if (!model->add_constraint(new_ptr_sval, NE_EXPR, old_ptr_sval,
                                            cd.get_ctxt()))
                     return false;
                 
-                model->set_value(old_reg, new_ptr_sval, cd.get_ctxt());
 
-                // if (old_size_sval) {
-                //     // need to make this prod
-                //     const svalue *copied_size_sval = get_copied_size(model, old_size_sval, prod_sval);
-                //      tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
-                //     const region *copied_old_reg = mgr->get_sized_region(pylist_reg, pyobj_ptr_tree, copied_size_sval);
-                //     const svalue *buffer_content_sval = model->get_store_value(copied_old_reg, cd.get_ctxt());
-                //     const region *copied_new_reg = mgr->get_sized_region(new_reg, NULL, copied_size_sval);
-                //     model->set_value(copied_new_reg, buffer_content_sval,
-                //                      cd.get_ctxt());
-                // } else {
-                //     model->mark_region_as_unknown(new_reg, cd.get_uncertainty());
-                // }
+                if (const region_svalue *old_reg = old_ptr_sval->dyn_cast_region_svalue())
+                {
+                    const region *freed_reg = old_reg->get_pointee();
+                    const svalue *old_size_sval = model->get_dynamic_extents(freed_reg);
+                    if (old_size_sval)
+                    {
+                        const svalue *copied_size_sval = get_copied_size(model, old_size_sval, new_size_sval);
+                        const region *copied_old_reg = mgr->get_sized_region(freed_reg, pyobj_ptr_ptr, copied_size_sval);
+                        // i think we have to loop here instead ... 
+                        const svalue *buffer_content_sval = model->get_store_value(copied_old_reg, cd.get_ctxt());
+                        const region *copied_new_reg = mgr->get_sized_region(new_reg, pyobj_ptr_ptr, copied_size_sval);
+                        model->set_value(copied_new_reg, buffer_content_sval,
+                                         cd.get_ctxt());
+                    }
+                    else
+                    {
+                        model->mark_region_as_unknown(new_reg, cd.get_uncertainty());
+                    }
 
-                // model->unbind_region_and_descendents(old_reg, POISON_KIND_FREED);
-                // model->unset_dynamic_extents(old_reg);
-                
-                // // model->on_realloc_with_move(cd, old_ptr_sval, new_ptr_sval);
+                    model->unbind_region_and_descendents(freed_reg, POISON_KIND_FREED);
+                    model->unset_dynamic_extents(freed_reg);
+                }
 
-                // const svalue *null_ptr = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
-                // if (!model->add_constraint(new_ptr_sval, NE_EXPR, null_ptr,
-                //                            cd.get_ctxt()))
-                //     return false;
+                model->on_realloc_with_move(cd, old_ptr_sval, new_ptr_sval);
 
-                // model->set_value(ob_size_region, new_size_sval, ctxt);
+                const svalue *null_ptr = mgr->get_or_create_null_ptr(pyobj_ptr_ptr);
+                if (!model->add_constraint(new_ptr_sval, NE_EXPR, null_ptr,
+                                           cd.get_ctxt()))
+                    return false;
+
+                model->set_value(ob_size_region, new_ob_size_sval, ctxt);
+                model->set_value(ob_item_reg, new_ptr_sval, cd.get_ctxt());
+
+                tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
+                const region *ob_refcnt_region = mgr->get_field_region(pylist_reg, ob_refcnt_tree);
+                const svalue *curr_refcnt = model->get_store_value(ob_refcnt_region, cd.get_ctxt());
+                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
+                const svalue *new_refcnt_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
+                model->set_value(ob_refcnt_region, new_refcnt_sval, cd.get_ctxt());
+
+                // test the previous element
+                const svalue *offset_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
+                                                                     sizeof_sval, old_ob_size_sval);
+                // const svalue *offset_sval2 = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
+                //                                                      sizeof_sval, oldold_ob_size_sval);
+                // const region *prev_element_region = mgr->get_offset_region(new_reg, pyobj_ptr_ptr, offset_sval2);
+                const region *prev_element_region = mgr->get_offset_region(new_reg, pyobj_ptr_ptr, offset_sval2);
+                const region *element_region = mgr->get_offset_region(new_reg, pyobj_ptr_ptr, offset_sval);
+                const svalue *newitem_sval = cd.get_arg_svalue(1);
+                model->set_value(element_region, newitem_sval, cd.get_ctxt());
+
                 return true;
             }
 
@@ -429,6 +481,8 @@ namespace ana
                               const exploded_edge *,
                               region_model_context *ctxt) const final override
             {
+                tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
+                tree pyobj_ptr_ptr = build_pointer_type(pyobj_ptr_tree);
                 const call_details cd(get_call_details(model, ctxt));
                 region_model_manager *mgr = cd.get_manager();
 
@@ -470,10 +524,13 @@ namespace ana
                     const svalue *sizeof_sval = mgr->get_or_create_cast(size_sval->get_type(), get_sizeof_pyobjptr(mgr));
                     const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
                                                                        sizeof_sval, size_sval);
-                    tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
-                    const region *ob_item_sized_region = mgr->get_sized_region(pylist_region, pyobj_ptr_tree, prod_sval);
-                    model->zero_fill_region(ob_item_sized_region);
-                    const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(ob_item_field), ob_item_sized_region);
+                    // tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
+                    // tree pyobj_ptr_ptr = build_pointer_type(pyobj_ptr_tree)
+                    const region *ob_item_sized_region3 = model->get_or_create_region_for_heap_alloc(prod_sval, cd.get_ctxt());
+                    // const region *ob_item_sized_region2 = mgr->get_sized_region(ob_item_region, pyobj_ptr_tree, prod_sval);
+                    // const region *ob_item_sized_region = mgr->get_sized_region(pylist_region, pyobj_ptr_tree, prod_sval);
+                    model->zero_fill_region(ob_item_sized_region3);
+                    const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(pyobj_ptr_ptr, ob_item_sized_region3);
                     model->set_value(ob_item_region, ob_item_ptr_sval, cd.get_ctxt());
                 }
 
@@ -694,8 +751,9 @@ namespace ana
 
     static void initialize_globals()
     {
-        if (pyobj_record == NULL_TREE)
+        if (pyobj_record == NULL_TREE) {
             pyobj_record = get_stashed_type_by_name("PyObject");
+        }
         if (varobj_record == NULL_TREE)
             varobj_record = get_stashed_type_by_name("PyVarObject");
         if (pylistobj_record == NULL_TREE)
