@@ -4676,21 +4676,52 @@ void region_model::check_pyobj_refcnt(const svalue *retval, region_model_context
 {
   region_model_manager *mgr = get_manager();
   // let's put this somewhere else later on so that we can only need to call it once
-  tree pyobj_tree = get_stashed_type_by_name("PyObject");
-  const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_tree);
+  tree pyobj_record = get_stashed_type_by_name("PyObject");
+  tree varobj_record = get_stashed_type_by_name("PyVarObject");
+  tree pylisttype_vardecl = get_stashed_global_var_by_name("PyList_Type");
+  tree pylongtype_vardecl = get_stashed_global_var_by_name("PyLong_Type");
+  tree pylongobj_record = get_stashed_type_by_name("PyLongObject");
+  tree pylistobj_record = get_stashed_type_by_name("PyListObject");
+//  const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_record);
 
+  if (!pyobj_record)
+      return;
+
+  const region *pylist_type_region = mgr->get_region_for_global(pylisttype_vardecl);
+  const svalue *pylist_type_ptr = mgr->get_ptr_svalue(TREE_TYPE(pylisttype_vardecl), pylist_type_region);
+  
+  tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
+  tree pyobj_ptr_tree = build_pointer_type(pyobj_record);
+  tree pyobj_ptr_ptr = build_pointer_type(pyobj_ptr_tree);
   /* 
   Iterate over all regions in the store.
   Check if a region is a PyObject. 
   If the svalue assigned to the region is NOT what the function is returning
   Then check refcnt != 0
   */
- 
+
+//  retval->dump(true);
+
   for (const auto &cluster : m_store)
   {
-      inform(UNKNOWN_LOCATION, "in iteration");
       const region* base_reg = cluster.first;
-      base_reg->dump(false);
+
+      if (base_reg->get_kind() != RK_HEAP_ALLOCATED)
+      {
+    continue;
+      }
+
+     inform(UNKNOWN_LOCATION, "_________________");
+      base_reg->dump(true);
+      if (const auto& retval_region_sval = retval->dyn_cast_region_svalue()) {
+        const auto& retval_reg = retval_region_sval->get_pointee();
+        if (retval_reg == base_reg) {
+          inform(UNKNOWN_LOCATION, "same thiong");
+          continue;
+        }
+      }
+
+
 
       // Get the type of the svalue associated with this region
       tree region_svalue_tree = get_store_value(base_reg, ctxt)->get_type();
@@ -4701,50 +4732,122 @@ void region_model::check_pyobj_refcnt(const svalue *retval, region_model_context
       is a PyObject)
       Continue to the next iteration if region_svalue_tree is NULL or not a pointer
       */
-      if (region_svalue_tree == NULL || TREE_CODE(region_svalue_tree) != POINTER_TYPE)
-    continue;
+    //   if (region_svalue_tree == NULL || TREE_CODE(region_svalue_tree) != POINTER_TYPE)
+    // continue;
 
-      // Dereference the type
-      region_svalue_tree = TREE_TYPE(region_svalue_tree);
+    //   // Dereference the type
+    //   region_svalue_tree = TREE_TYPE(region_svalue_tree);
 
-      // Continue if the region_svalue_tree isn't a PyObject
-      // in the future look up "c" parent classes 
-      if (pyobj_svalue->get_type() != region_svalue_tree)
-    continue;
+    //   // Continue if the region_svalue_tree isn't a PyObject
+    //   // in the future look up "c" parent classes 
+    //   if (pyobj_svalue->get_type() != region_svalue_tree)
+    // continue;
 
       // Get the ob_refcnt field region from the base region
       // let's put this somewhere else later on so that we can only need to call it once
-      tree ob_refcnt_tree = get_field_by_name(pyobj_tree, "ob_refcnt");
+      tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
       const region *ob_refcnt_region = mgr->get_field_region(base_reg, ob_refcnt_tree);
-      ob_refcnt_region->dump(false);
 
       // Get the svalue of the ob_refcnt field
       const svalue *ob_refcnt_sval = get_store_value(ob_refcnt_region, ctxt);
-      ob_refcnt_sval->dump(false);
+      ob_refcnt_sval->dump(true);
 
       // Continue if ob_refcnt_sval is not a sub_svalue
-      if (ob_refcnt_sval->get_kind() != SK_SUB)
-    continue;
+    //   if (ob_refcnt_sval->get_kind() != SK_SUB)
+    // continue;
 
       // Cast the ob_refcnt_sval to a sub_svalue
-      const sub_svalue *refcnt_sub_sval = ob_refcnt_sval->dyn_cast_sub_svalue();
-      refcnt_sub_sval->dump(false);
-      const svalue *parent_sval = refcnt_sub_sval->get_parent();
+      // const sub_svalue *refcnt_sub_sval = ob_refcnt_sval->dyn_cast_sub_svalue();
+      // refcnt_sub_sval->dump(true);
+      // const svalue *parent_sval = refcnt_sub_sval->get_parent();
 
       // Check if the parent svalue of refcnt_sub_sval is a region
-      if (parent_sval->get_kind() != SK_REGION)
-    continue;
+      // if (parent_sval->get_kind() != SK_REGION)
+    // continue;
 
       // Continue if we are looking at the retval
-      if (retval && svalue::cmp_ptr(parent_sval, retval) == 0) {
-    inform(UNKNOWN_LOCATION, "***rvalue returned by function is equal to current svalue of region");
-    retval->dump(false);
-    parent_sval->dump(false);
+      // if (retval && svalue::cmp_ptr(parent_sval, retval) == 0)
+      // {
+    // inform(UNKNOWN_LOCATION, "***rvalue returned by function is equal to current svalue of region");
+    // retval->dump(false);
+    // parent_sval->dump(false);
     // continue;
-      } else {
-        inform(UNKNOWN_LOCATION, "check ref cnt here");
-        retval->dump(false);
-        parent_sval->dump(false);
+      // }
+      // else {
+      // inform(UNKNOWN_LOCATION, "check ref cnt here");
+      // retval->dump(false);
+      // parent_sval->dump(false);
+      // }
+
+
+      // inform(UNKNOWN_LOCATION, "YOO HOO OOHOHO");
+      int actual_refcnt = 0;
+
+      for (const auto& other_cluster : m_store) {
+        // if (other_cluster.first->get_base_region() == base_reg)
+        // {
+        //   actual_refcnt++;
+        // }
+        for (const auto& a_cluster : other_cluster.second->get_map()) {
+          const auto& sval = a_cluster.second;
+          if(const auto& curr_region = sval->maybe_get_region()) {
+            if (curr_region->get_kind() != RK_HEAP_ALLOCATED) {
+            continue;
+            }
+            curr_region->dump(true);
+
+            if (curr_region->get_base_region() == base_reg)
+            {
+            actual_refcnt++;
+            }
+
+            const region *ob_type_region = mgr->get_field_region(curr_region, ob_type_field);
+            const svalue *stored_sval = get_store_value(ob_type_region, ctxt);
+            // stored_sval->dump(true);
+            if (const auto& remove_cast = stored_sval->dyn_cast_unaryop_svalue()) {
+              const svalue *type = remove_cast->get_arg();
+              if (type == pylist_type_ptr) {
+                  // inform(UNKNOWN_LOCATION, "it's a pylist");
+                  tree ob_item_field_tree = get_field_by_name(pylistobj_record, "ob_item");
+                  const region *ob_item_field_reg = mgr->get_field_region(curr_region, ob_item_field_tree);
+                  const svalue *ob_item_ptr = get_store_value(ob_item_field_reg, ctxt);
+
+                  if (const auto& cast_ob_item_reg = ob_item_ptr->dyn_cast_region_svalue())
+                  {
+                    const region *ob_item_reg = cast_ob_item_reg->get_pointee();
+                    // ob_item_reg->dump(true);
+                    const svalue *allocated_bytes = get_dynamic_extents(ob_item_reg);
+                    // allocated_bytes->dump(true);
+                    const region *ob_item_sized = mgr->get_sized_region(ob_item_reg, pyobj_ptr_ptr, allocated_bytes);
+                    // ob_item_sized->dump(true);
+                    const svalue *buffer_contents_sval = get_store_value(ob_item_sized, ctxt);
+                    // buffer_contents_sval->dump(true);
+
+                    if (const auto& buffer_contents = buffer_contents_sval->dyn_cast_compound_svalue()) {
+                      for (const auto& buffer_content : buffer_contents->get_map()) {
+                        const auto& content_value = buffer_content.second;
+                        // content_value->dump(true);
+                        if (const auto& content_region = content_value->dyn_cast_region_svalue()) {
+                          if (content_region->get_pointee() == base_reg) {
+                            actual_refcnt++;
+                          }
+                        }
+                      }
+                    }
+                  }
+              }
+            }
+        }
+      }
+      }
+
+      inform(UNKNOWN_LOCATION, "actual ref count: %d", actual_refcnt);
+      inform(UNKNOWN_LOCATION, "_________________");
+      const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst(ob_refcnt_sval->get_type(), actual_refcnt);
+      if (actual_refcnt_sval != ob_refcnt_sval) {
+        if (ctxt) {
+          // ctxt->warn(make_unique<ob_refcnt_diagnostic> (base_region, ob_refcnt_sval, actual_refcnt_sval));
+        }
       }
 
       // check ref count here comparing actual reference count vs ob_refcnt
@@ -4834,7 +4937,7 @@ region_model::pop_frame (tree result_lvalue,
     } 
 
     // if our plugin is enabled; maybe query global stash later to see ?
-    // check_pyobj_refcnt(retval, ctxt);
+    check_pyobj_refcnt(retval, ctxt);
     unbind_region_and_descendents(frame_reg, POISON_KIND_POPPED_STACK);
 }
 
