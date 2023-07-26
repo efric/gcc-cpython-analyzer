@@ -434,6 +434,11 @@ public:
 			     const svalue *new_ptr_sval,
 			     const extrinsic_state &ext_state) const;
 
+  void on_pyobject_heap_alloc (region_model *model,
+		      sm_state_map *smap,
+		      const svalue *new_ptr_sval,
+		      const extrinsic_state &ext_state) const;
+
   standard_deallocator_set m_free;
   standard_deallocator_set m_scalar_delete;
   standard_deallocator_set m_vector_delete;
@@ -2504,6 +2509,18 @@ on_realloc_with_move (region_model *model,
 		   NULL, ext_state);
 }
 
+void
+malloc_state_machine::
+on_pyobject_heap_alloc (region_model *model,
+		      sm_state_map *smap,
+		      const svalue *new_ptr_sval,
+		      const extrinsic_state &ext_state) const
+{
+  smap->set_state (model, new_ptr_sval,
+		   m_free.m_nonnull,
+		   NULL, ext_state);
+}
+
 } // anonymous namespace
 
 /* Internal interface to this file. */
@@ -2544,6 +2561,35 @@ region_model::on_realloc_with_move (const call_details &cd,
   malloc_sm.on_realloc_with_move (this,
 				  smap,
 				  old_ptr_sval,
+				  new_ptr_sval,
+				  *ext_state);
+}
+
+void
+region_model::on_pyobject_heap_alloc (const call_details &cd,
+				    const svalue *new_ptr_sval)
+{
+  region_model_context *ctxt = cd.get_ctxt ();
+  if (!ctxt)
+    return;
+  const extrinsic_state *ext_state = ctxt->get_ext_state ();
+  if (!ext_state)
+    return;
+
+  sm_state_map *smap;
+  const state_machine *sm;
+  unsigned sm_idx;
+  if (!ctxt->get_malloc_map (&smap, &sm, &sm_idx))
+    return;
+
+  gcc_assert (smap);
+  gcc_assert (sm);
+
+  const malloc_state_machine &malloc_sm
+    = (const malloc_state_machine &)*sm;
+
+  malloc_sm.on_pyobject_heap_alloc (this,
+				  smap,
 				  new_ptr_sval,
 				  *ext_state);
 }

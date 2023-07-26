@@ -471,12 +471,12 @@ namespace ana
                 // create region for pylist
                 const svalue *tp_basicsize_sval = mgr->get_or_create_unknown_svalue(NULL);
                 const region *pylist_region = model->get_or_create_region_for_heap_alloc(tp_basicsize_sval, cd.get_ctxt());
-                model->set_value(pylist_region, pylist_svalue, cd.get_ctxt());
+                // model->set_value(pylist_region, pylist_svalue, cd.get_ctxt());
 
                 // #define PyObject_VAR_HEAD      PyVarObject ob_base;
                 tree varobj_field = get_field_by_name(pylistobj_record, "ob_base");
                 const region *varobj_region = mgr->get_field_region(pylist_region, varobj_field);
-                model->set_value(varobj_region, varobj_svalue, cd.get_ctxt());
+                // model->set_value(varobj_region, varobj_svalue, cd.get_ctxt());
 
                 // PyObject **ob_item;
                 tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
@@ -490,13 +490,13 @@ namespace ana
                 // maybe_get_constant might return NULL_TREE which will then not give us right result
                 // TODO: add some extra check here
 
-                // if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node))
-                // {
-                //     const svalue *null_sval = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
-                //     model->set_value(ob_item_region, null_sval, cd.get_ctxt());
-                // }
-                // else // calloc
-                // {
+                if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node))
+                {
+                    const svalue *null_sval = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
+                    model->set_value(ob_item_region, null_sval, cd.get_ctxt());
+                }
+                else // calloc
+                {
                 const svalue *sizeof_sval = mgr->get_or_create_cast(size_sval->get_type(), get_sizeof_pyobjptr(mgr));
                 const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
                                                                    sizeof_sval, size_sval);
@@ -509,7 +509,7 @@ namespace ana
                 const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(pyobj_ptr_ptr, ob_item_sized_region3);
                 const svalue *ob_item_unmergeable = mgr->get_or_create_unmergeable(ob_item_ptr_sval);
                 model->set_value(ob_item_region, ob_item_unmergeable, cd.get_ctxt());
-                // }
+                }
 
                 /*
                 typedef struct {
@@ -519,7 +519,7 @@ namespace ana
                 */
                 tree ob_base_tree = get_field_by_name(varobj_record, "ob_base");
                 const region *ob_base_region = mgr->get_field_region(varobj_region, ob_base_tree);
-                model->set_value(ob_base_region, pyobj_svalue, cd.get_ctxt());
+                // model->set_value(ob_base_region, pyobj_svalue, cd.get_ctxt());
 
                 tree ob_size_tree = get_field_by_name(varobj_record, "ob_size");
                 const region *ob_size_region = mgr->get_field_region(varobj_region, ob_size_tree);
@@ -549,9 +549,13 @@ namespace ana
                 const region *ob_type_region = mgr->get_field_region(ob_base_region, ob_type_field);
                 model->set_value(ob_type_region, pylist_type_ptr_sval, cd.get_ctxt());
 
+                const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), pylist_region);
+                // const svalue *unn = mgr->get_or_create_unmergeable(ptr_sval);
+                model->on_pyobject_heap_alloc(cd, ptr_sval);
+
                 if (cd.get_lhs_type())
                 {
-                    const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), pylist_region);
+                    // const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), pylist_region);
                     cd.maybe_set_lhs(ptr_sval);
                 }
                 return true;
@@ -628,7 +632,9 @@ namespace ana
                 region_model_manager *mgr = cd.get_manager();
 
                 const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_record);
+                // const svalue *pyobj_unmergeable = mgr->get_or_create_unmergeable(pyobj_svalue);
                 const svalue *pylong_svalue = mgr->get_or_create_unknown_svalue(pylongobj_record);
+                // const svalue *pylong_unmergeable = mgr->get_or_create_unmergeable(pylong_svalue);
 
                 // // Create a new region for PyLongObject.
                 // tree tp_basicsize_field = get_field_by_name(pylongtype_vardecl, "tp_basicsize");
@@ -638,13 +644,16 @@ namespace ana
 
                 // tree tp_basicsize_field = get_field_by_name(pylongtype_vardecl, "tp_basicsize");
                 const svalue *tp_basicsize_sval = mgr->get_or_create_unknown_svalue(NULL);
+                // const svalue *tp_basic_unmergeable = mgr->get_or_create_unmergeable(tp_basicsize_sval);
                 const region *new_pylong_region = model->get_or_create_region_for_heap_alloc(tp_basicsize_sval, cd.get_ctxt());
-                model->set_value(new_pylong_region, pylong_svalue, cd.get_ctxt());
+                // model->set_value(new_pylong_region, pylong_unmergeable, cd.get_ctxt());
+                const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pylong_region);
+                const svalue *unn = mgr->get_or_create_unmergeable(ptr_sval);
 
                 // Create a region for the base PyObject within the PyLongObject.
                 tree ob_base_tree = get_field_by_name(pylongobj_record, "ob_base");
                 const region *ob_base_region = mgr->get_field_region(new_pylong_region, ob_base_tree);
-                model->set_value(ob_base_region, pyobj_svalue, cd.get_ctxt());
+                // model->set_value(ob_base_region, pyobj_unmergeable, cd.get_ctxt());
 
                 tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(ob_base_region, ob_refcnt_tree);
@@ -667,9 +676,11 @@ namespace ana
 
                 if (cd.get_lhs_type())
                 {
-                    const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pylong_region);
+                    // const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pylong_region);
                     cd.maybe_set_lhs(ptr_sval);
                 }
+
+                model->on_pyobject_heap_alloc(cd, ptr_sval);
                 return true;
             }
         };
@@ -759,8 +770,8 @@ namespace ana
                                        make_unique<kf_PyLong_FromLong>());
         // PyDECREF is a macro that goes to _Py_DECREF in python 3.9 but Py_DECREF in latest
         // do _Py_Dealloc // check if this works in python 3.11 as well
-        iface->register_known_function("_Py_Dealloc",
-                                       make_unique<kf_Py_Dealloc>());
+        // iface->register_known_function("_Py_Dealloc",
+        //                                make_unique<kf_Py_Dealloc>());
         iface->register_known_function("PyList_New",
                                        make_unique<kf_PyList_New>());
         iface->register_known_function("PyList_Append",

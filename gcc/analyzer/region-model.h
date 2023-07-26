@@ -475,6 +475,8 @@ class region_model
 			     const svalue *old_ptr_sval,
 			     const svalue *new_ptr_sval);
 
+  void on_pyobject_heap_alloc(const call_details &cd,
+                              const svalue *new_ptr_sval);
   /* Implemented in sm-taint.cc.  */
   void mark_as_tainted (const svalue *sval,
 			region_model_context *ctxt);
