@@ -115,7 +115,7 @@ proc prune_gcc_output { text } {
     # Call into multiline.exp to handle any multiline output directives.
     set text [handle-multiline-outputs $text]
 
-    #send_user "After:$text\n"
+    send_user "After:$text\n"
 
     return $text
 }
