@@ -496,6 +496,7 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
     update_model (region_model *model, const exploded_edge *,
                   region_model_context *ctxt) const final override
     {
+      inform(UNKNOWN_LOCATION, "update model");
       tree pyobj_ptr_tree = build_pointer_type (pyobj_record);
       tree pyobj_ptr_ptr = build_pointer_type (pyobj_ptr_tree);
       tree pylisttype_vardecl_ptr
@@ -518,13 +519,13 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
       const region *pylist_region
           = model->get_or_create_region_for_heap_alloc (tp_basicsize_sval,
                                                         cd.get_ctxt ());
-      // model->set_value(pylist_region, pylist_svalue, cd.get_ctxt());
+      model->set_value(pylist_region, pylist_svalue, cd.get_ctxt());
 
       // #define PyObject_VAR_HEAD      PyVarObject ob_base;
       tree varobj_field = get_field_by_name (pylistobj_record, "ob_base");
       const region *varobj_region
           = mgr->get_field_region (pylist_region, varobj_field);
-      // model->set_value(varobj_region, varobj_svalue, cd.get_ctxt());
+      model->set_value(varobj_region, varobj_svalue, cd.get_ctxt());
 
       // PyObject **ob_item;
       tree ob_item_field = get_field_by_name (pylistobj_record, "ob_item");
@@ -542,15 +543,15 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
       // right result
       // TODO: add some extra check here
 
-      if (tree_int_cst_equal (size_cond_sval->maybe_get_constant (),
-                              integer_one_node))
-        {
-          const svalue *null_sval
-              = mgr->get_or_create_null_ptr (TREE_TYPE (ob_item_field));
-          model->set_value (ob_item_region, null_sval, cd.get_ctxt ());
-        }
-      else // calloc
-        {
+      // if (tree_int_cst_equal (size_cond_sval->maybe_get_constant (),
+      //                         integer_one_node))
+      //   {
+      //     const svalue *null_sval
+      //         = mgr->get_or_create_null_ptr (TREE_TYPE (ob_item_field));
+      //     model->set_value (ob_item_region, null_sval, cd.get_ctxt ());
+      //   }
+      // else // calloc
+      //   {
           const svalue *sizeof_sval = mgr->get_or_create_cast (
               size_sval->get_type (), get_sizeof_pyobjptr (mgr));
           const svalue *prod_sval = mgr->get_or_create_binop (
@@ -571,7 +572,7 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
               = mgr->get_or_create_unmergeable (ob_item_ptr_sval);
           model->set_value (ob_item_region, ob_item_unmergeable,
                             cd.get_ctxt ());
-        }
+        // }
 
       /*
          typedef struct {
@@ -621,14 +622,15 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
 
       const svalue *ptr_sval
           = mgr->get_ptr_svalue (cd.get_lhs_type (), pylist_region);
-      // const svalue *unn = mgr->get_or_create_unmergeable(ptr_sval);
-      model->on_pyobject_heap_alloc (cd, ptr_sval);
+      const svalue *unn = mgr->get_or_create_unmergeable(ptr_sval);
+      model->on_pyobject_heap_alloc (cd, unn);
 
+      inform(UNKNOWN_LOCATION, "update model end");
       if (cd.get_lhs_type ())
         {
           // const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(),
           // pylist_region);
-          cd.maybe_set_lhs (ptr_sval);
+          cd.maybe_set_lhs (unn);
         }
       return true;
     }
@@ -722,8 +724,8 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
       const region *new_pylong_region
           = model->get_or_create_region_for_heap_alloc (tp_basicsize_sval,
                                                         cd.get_ctxt ());
-      // model->set_value(new_pylong_region, pylong_unmergeable,
-      // cd.get_ctxt());
+      model->set_value(new_pylong_region, pylong_svalue,
+      cd.get_ctxt());
       const svalue *ptr_sval
           = mgr->get_ptr_svalue (cd.get_lhs_type (), new_pylong_region);
       const svalue *unn = mgr->get_or_create_unmergeable (ptr_sval);
@@ -732,7 +734,7 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
       tree ob_base_tree = get_field_by_name (pylongobj_record, "ob_base");
       const region *ob_base_region
           = mgr->get_field_region (new_pylong_region, ob_base_tree);
-      // model->set_value(ob_base_region, pyobj_unmergeable, cd.get_ctxt());
+      model->set_value(ob_base_region, pyobj_svalue, cd.get_ctxt());
 
       tree ob_refcnt_tree = get_field_by_name (pyobj_record, "ob_refcnt");
       const region *ob_refcnt_region
@@ -763,10 +765,10 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
         {
           // const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(),
           // new_pylong_region);
-          cd.maybe_set_lhs (ptr_sval);
+          cd.maybe_set_lhs (unn);
         }
 
-      model->on_pyobject_heap_alloc (cd, ptr_sval);
+      model->on_pyobject_heap_alloc (cd, unn);
       return true;
     }
   };

@@ -4897,6 +4897,7 @@ region_model::pop_frame (tree result_lvalue,
 			 region_model_context *ctxt,
 			 bool eval_return_svalue)
 {
+  inform(UNKNOWN_LOCATION, "start pop frame");
   gcc_assert (m_current_frame);
 
   const frame_region *frame_reg = m_current_frame;
@@ -4937,6 +4938,7 @@ region_model::pop_frame (tree result_lvalue,
     } 
 
     // if our plugin is enabled; maybe query global stash later to see ?
+    inform(UNKNOWN_LOCATION, "pop frame");
     check_pyobj_refcnt(retval, ctxt);
     unbind_region_and_descendents(frame_reg, POISON_KIND_POPPED_STACK);
 }
