@@ -95,59 +95,65 @@ namespace ana
         {
             return (cd.num_args() == 2); // TODO: more checks here
         }
-        // void impl_call_pre(const call_details &cd) const final override;
+        void impl_call_pre(const call_details &cd) const final override;
         void impl_call_post(const call_details &cd) const final override;
     };
 
-    // void
-    // kf_PyList_Append::impl_call_pre(const call_details &cd) const
-    // {
-    //     region_model_manager *mgr = cd.get_manager();
-    //     region_model *model = cd.get_model();
+    void
+    kf_PyList_Append::impl_call_pre(const call_details &cd) const
+    {
+        region_model_manager *mgr = cd.get_manager();
+        region_model *model = cd.get_model();
 
-    //     const svalue *pylist_sval = cd.get_arg_svalue(0);
-    //     const region *pylist_reg = model->deref_rvalue(pylist_sval,
-    //                                                    cd.get_arg_tree(0),
-    //                                                    cd.get_ctxt());
+        const svalue *pylist_sval = cd.get_arg_svalue(0);
+        const region *pylist_reg = model->deref_rvalue(pylist_sval,
+                                                       cd.get_arg_tree(0),
+                                                       cd.get_ctxt());
 
-    //     const svalue *newitem_sval = cd.get_arg_svalue(1);
-    //     const region *newitem_reg = model->deref_rvalue(pylist_sval,
-    //                                                     cd.get_arg_tree(0),
-    //                                                     cd.get_ctxt());
+        const svalue *newitem_sval = cd.get_arg_svalue(1);
+        const region *newitem_reg = model->deref_rvalue(pylist_sval,
+                                                        cd.get_arg_tree(0),
+                                                        cd.get_ctxt());
 
-    //     tree pylisttype_vardecl_ptr
-    //         = build_pointer_type (TREE_TYPE (pylisttype_vardecl));
-    //     // PyList_Check
-    //     tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
-    //     const region *ob_type_region = mgr->get_field_region(pylist_reg, ob_type_field);
-    //     const svalue *stored_sval = model->get_store_value(ob_type_region, cd.get_ctxt());
-    //     const region *pylist_type_region = mgr->get_region_for_global(pylisttype_vardecl);
-    //     const svalue *pylist_type_ptr = mgr->get_ptr_svalue(pylisttype_vardecl_ptr, pylist_type_region);
+        if (pylist_sval->get_kind () != SK_REGION
+            || pylist_sval->get_kind () != SK_CONSTANT)
+          {
+            return;
+          }
 
-    //     // const unaryop_svalue *unwrapped_sval = stored_sval->dyn_cast_unaryop_svalue();
-    //     if (stored_sval != pylist_type_ptr)
-    //     {
-    //         // emit diagnostic -Wanalyzer-type-error
-    //         // inform(UNKNOWN_LOCATION, "not equal");
-    //         cd.get_ctxt()->terminate_path();
-    //         return;
-    //     }
-    //     else{
-    //       // inform(UNKNOWN_LOCATION, "EQUAL");
-    //     }
+        tree pylisttype_vardecl_ptr
+            = build_pointer_type (TREE_TYPE (pylisttype_vardecl));
+        // PyList_Check
+        tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
+        const region *ob_type_region = mgr->get_field_region(pylist_reg, ob_type_field);
+        const svalue *stored_sval = model->get_store_value(ob_type_region, cd.get_ctxt());
+        const region *pylist_type_region = mgr->get_region_for_global(pylisttype_vardecl);
+        const svalue *pylist_type_ptr = mgr->get_ptr_svalue(pylisttype_vardecl_ptr, pylist_type_region);
 
-    //     // Check that new_item is not null
-    //     {
-    //         const svalue *null_ptr = mgr->get_or_create_int_cst(newitem_sval->get_type(), 0);
-    //         if (!model->add_constraint(newitem_sval, NE_EXPR, null_ptr,
-    //                                    cd.get_ctxt()))
-    //         {
-    //             // emit diagnostic here
-    //             cd.get_ctxt()->terminate_path();
-    //             return;
-    //         }
-    //     }
-    // }
+        // const unaryop_svalue *unwrapped_sval = stored_sval->dyn_cast_unaryop_svalue();
+        if (stored_sval != pylist_type_ptr)
+        {
+            // emit diagnostic -Wanalyzer-type-error
+            // inform(UNKNOWN_LOCATION, "not equal");
+            cd.get_ctxt()->terminate_path();
+            return;
+        }
+        else{
+          // inform(UNKNOWN_LOCATION, "EQUAL");
+        }
+
+        // Check that new_item is not null
+        {
+            const svalue *null_ptr = mgr->get_or_create_int_cst(newitem_sval->get_type(), 0);
+            if (!model->add_constraint(newitem_sval, NE_EXPR, null_ptr,
+                                       cd.get_ctxt()))
+            {
+                // emit diagnostic here
+                cd.get_ctxt()->terminate_path();
+                return;
+            }
+        }
+    }
 
     /* TODO: Refactor for modularity*/
     void
