@@ -479,6 +479,9 @@ class region_model
   void mark_as_tainted (const svalue *sval,
 			region_model_context *ctxt);
 
+  void on_pyobject_heap_alloc (const call_details &cd,
+                               const svalue *new_ptr_sval);
+
   bool add_constraint (const svalue *lhs,
 		       enum tree_code op,
 		       const svalue *rhs,

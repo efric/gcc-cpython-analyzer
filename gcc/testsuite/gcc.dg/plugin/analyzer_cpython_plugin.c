@@ -553,6 +553,7 @@ namespace ana
                 {
                     const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), pylist_region);
                     cd.maybe_set_lhs(ptr_sval);
+                    model->on_pyobject_heap_alloc(cd, ptr_sval);
                 }
                 return true;
             }
@@ -669,6 +670,7 @@ namespace ana
                 {
                     const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pylong_region);
                     cd.maybe_set_lhs(ptr_sval);
+                    model->on_pyobject_heap_alloc(cd, ptr_sval);
                 }
                 return true;
             }
