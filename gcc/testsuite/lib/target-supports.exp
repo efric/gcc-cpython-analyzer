@@ -12381,3 +12381,13 @@ proc check_effective_target_const_volatile_readonly_section { } {
     }
   return 1
 }
+
+proc check_python_flags { } {
+    set result [remote_exec host "python3-config --cflags"]
+    set status [lindex $result 0]
+    if { $status == 0 } {
+        return [lindex $result 1]
+    } else {
+        return "UNSUPPORTED"
+    }
+}
