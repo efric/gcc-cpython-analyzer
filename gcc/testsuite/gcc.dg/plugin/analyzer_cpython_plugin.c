@@ -297,8 +297,9 @@ namespace ana
                 tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(newitem_reg, ob_refcnt_tree);
                 const svalue *curr_refcnt = model->get_store_value(ob_refcnt_region, cd.get_ctxt());
-                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
-                const svalue *new_refcnt_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
+                const svalue *refcnt_one_sval = mgr->get_or_create_int_cst(size_type_node, 1);
+                // const svalue *refcnt_one_sval = mgr->get_or_create_int_cst(size_type_node, 1);
+                const svalue *new_refcnt_sval = mgr->get_or_create_binop(size_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
                 model->set_value(ob_refcnt_region, new_refcnt_sval, cd.get_ctxt());
 
                 return true;
@@ -394,8 +395,9 @@ namespace ana
                 tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(newitem_reg, ob_refcnt_tree);
                 const svalue *curr_refcnt = model->get_store_value(ob_refcnt_region, cd.get_ctxt());
-                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
-                const svalue *new_refcnt_sval = mgr->get_or_create_binop(integer_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
+                const svalue *refcnt_one_sval = mgr->get_or_create_int_cst(size_type_node, 1);
+                // const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
+                const svalue *new_refcnt_sval = mgr->get_or_create_binop(size_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
                 model->set_value(ob_refcnt_region, new_refcnt_sval, cd.get_ctxt());
 
                 return true;
@@ -572,7 +574,8 @@ namespace ana
 
                 tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(ob_base_region, ob_refcnt_tree);
-                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1); // TODO: switch to Py_ssize_t
+                const svalue *refcnt_one_sval = mgr->get_or_create_int_cst(size_type_node, 1);
+//                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1); // TODO: switch to Py_ssize_t
                 model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
 
                 // get pointer svalue for PyList_Type then assign it to ob_type field.
@@ -688,7 +691,9 @@ namespace ana
                 tree ob_refcnt_tree = get_field_by_name(pyobj_record, "ob_refcnt");
                 const region *ob_refcnt_region = mgr->get_field_region(ob_base_region, ob_refcnt_tree);
                 // after u do stash global variabvles, change this to pyssize
-                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
+                
+                const svalue *refcnt_one_sval = mgr->get_or_create_int_cst(size_type_node, 1);
+//                const svalue *refcnt_one_sval = mgr->get_or_create_long_cst(long_integer_type_node, 1);
                 model->set_value(ob_refcnt_region, refcnt_one_sval, cd.get_ctxt());
 
                 // get pointer svalue for PyLong_Type then assign it to ob_type field.
