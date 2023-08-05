@@ -5276,6 +5276,8 @@ region_model::check_dynamic_size_for_floats (const svalue *size_in_bytes,
 	}
 }
 
+static void region_model::register_alloc()
+
 /* Return a region describing a heap-allocated block of memory.
    Use CTXT to complain about tainted sizes.
 
@@ -5284,7 +5286,7 @@ region_model::check_dynamic_size_for_floats (const svalue *size_in_bytes,
 
 const region *
 region_model::get_or_create_region_for_heap_alloc (const svalue *size_in_bytes,
-						   region_model_context *ctxt)
+						   region_model_context *ctxt, bool register_alloc = false)
 {
   /* Determine which regions are referenced in this region_model, so that
      we can reuse an existing heap_allocated_region if it's not in use on
@@ -5306,6 +5308,32 @@ region_model::get_or_create_region_for_heap_alloc (const svalue *size_in_bytes,
   if (size_in_bytes)
     if (compat_types_p (size_in_bytes->get_type (), size_type_node))
       set_dynamic_extents (reg, size_in_bytes, ctxt);
+
+  if (register_alloc)
+  {
+    const svalue *ptr_sval
+        = mgr->get_ptr_svalue (cd.get_lhs_type (), pylist_region);
+      region_model_context *ctxt = cd.get_ctxt ();
+      if (!ctxt)
+        return;
+      const extrinsic_state *ext_state = ctxt->get_ext_state ();
+      if (!ext_state)
+        return;
+
+      sm_state_map *smap;
+      const state_machine *sm;
+      unsigned sm_idx;
+      if (!ctxt->get_malloc_map (&smap, &sm, &sm_idx))
+        return;
+
+      gcc_assert (smap);
+      gcc_assert (sm);
+
+      const malloc_state_machine &malloc_sm
+          = (const malloc_state_machine &)*sm;
+
+      smap->set_state (this, new_ptr_sval, m_free.m_nonnull, NULL, ext_state);
+  }
   return reg;
 }
 
