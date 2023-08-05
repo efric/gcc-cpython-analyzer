@@ -184,14 +184,30 @@ namespace ana
                 const region *pylist_reg = model->deref_rvalue(pylist_sval,
                                                                cd.get_arg_tree(0),
                                                                cd.get_ctxt());
-                
-                
 
-                /* Identify ob_item field and set it to NULL. */
-                // when it fails, if there's anything there, you should get rid of it first. 
+                if (pylist_sval->get_kind () != SK_REGION
+                    && pylist_sval->get_kind () != SK_CONSTANT)
+                  {
+                    return true;
+                  }
+
+                // /* Identify ob_item field and set it to NULL. */
+                // // when it fails, if there's anything there, you should get rid of it first. 
                 tree ob_item_field = get_field_by_name(pylistobj_record, "ob_item");
                 const region *ob_item_reg = mgr->get_field_region(pylist_reg, ob_item_field);
                 const svalue *old_ptr_sval = model->get_store_value(ob_item_reg, cd.get_ctxt());
+
+                // if (const unmergeable_svalue *casted_sval = old_ptr_unmergeable->dyn_cast_unmergeable_svalue())
+                // {
+                //   const svalue *old_ptr_sval = casted_sval->get_arg();
+                //   if (const region_svalue *old_reg
+                //       = old_ptr_sval->dyn_cast_region_svalue ())
+                //     {
+                //       const region *freed_reg = old_reg->get_pointee ();
+                //       model->unbind_region_and_descendents (freed_reg, POISON_KIND_FREED);
+                //       model->unset_dynamic_extents (freed_reg);
+                //     }
+                // }
 
                 if (const region_svalue *old_reg = old_ptr_sval->dyn_cast_region_svalue())
                 {
@@ -236,7 +252,7 @@ namespace ana
                 const svalue *newitem_sval = cd.get_arg_svalue(1);
                 const region *newitem_reg = model->deref_rvalue(newitem_sval, cd.get_arg_tree(1), cd.get_ctxt());
                 // if something we know nothing about, just increment it
-                if (pylist_sval->get_kind() != SK_REGION || pylist_sval->get_kind() != SK_CONSTANT)
+                if (pylist_sval->get_kind() != SK_REGION && pylist_sval->get_kind() != SK_CONSTANT)
                 {
                   tree ob_refcnt_tree
                       = get_field_by_name (pyobj_record, "ob_refcnt");
@@ -357,8 +373,8 @@ namespace ana
                 const svalue *newitem_sval = cd.get_arg_svalue(1);
                 const region *newitem_reg = model->deref_rvalue(newitem_sval, cd.get_arg_tree(1), cd.get_ctxt());
 
-                                // if something we know nothing about, just increment it
-                if (pylist_sval->get_kind() != SK_REGION || pylist_sval->get_kind() != SK_CONSTANT)
+                //                 // if something we know nothing about, just increment it
+                if (pylist_sval->get_kind() != SK_REGION && pylist_sval->get_kind() != SK_CONSTANT)
                 {
                   tree ob_refcnt_tree
                       = get_field_by_name (pyobj_record, "ob_refcnt");
@@ -393,6 +409,7 @@ namespace ana
                 /* Create the new region.  */
                 const region *new_reg = model->get_or_create_region_for_heap_alloc(new_size_sval, cd.get_ctxt());
                 const svalue *new_ptr_sval = mgr->get_ptr_svalue(pyobj_ptr_ptr, new_reg);
+                const svalue *unmergeable_ptr_sval = mgr->get_or_create_unmergeable(new_ptr_sval);
                 if (!model->add_constraint(new_ptr_sval, NE_EXPR, old_ptr_sval,
                                            cd.get_ctxt()))
                     return false;
@@ -425,7 +442,7 @@ namespace ana
                     return false;
 
                 model->set_value(ob_size_region, new_ob_size_sval, ctxt);
-                model->set_value(ob_item_reg, new_ptr_sval, cd.get_ctxt());
+                model->set_value(ob_item_reg, unmergeable_ptr_sval, cd.get_ctxt());
 
                 const svalue *offset_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
                                                                      sizeof_sval, old_ob_size_sval);
@@ -567,13 +584,13 @@ namespace ana
                 // maybe_get_constant might return NULL_TREE which will then not give us right result
                 // TODO: add some extra check here
 
-                // if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node))
-                // {
-                //     const svalue *null_sval = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
-                //     model->set_value(ob_item_region, null_sval, cd.get_ctxt());
-                // }
-                // else // calloc
-                // {
+                if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node))
+                {
+                    const svalue *null_sval = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
+                    model->set_value(ob_item_region, null_sval, cd.get_ctxt());
+                }
+                else // calloc
+                {
                 const svalue *sizeof_sval = mgr->get_or_create_cast(size_sval->get_type(), get_sizeof_pyobjptr(mgr));
                 const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
                                                                    sizeof_sval, size_sval);
@@ -586,7 +603,7 @@ namespace ana
                 const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(pyobj_ptr_ptr, ob_item_sized_region3);
                 const svalue *ob_item_unmergeable = mgr->get_or_create_unmergeable(ob_item_ptr_sval);
                 model->set_value(ob_item_region, ob_item_unmergeable, cd.get_ctxt());
-                // }
+                }
 
                 /*
                 typedef struct {
@@ -630,8 +647,9 @@ namespace ana
                 if (cd.get_lhs_type())
                 {
                     const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), pylist_region);
+                    // const svalue *unn = mgr->get_or_create_unmergeable(ptr_sval);
                     cd.maybe_set_lhs(ptr_sval);
-                    model->on_pyobject_heap_alloc(cd, ptr_sval);
+                    // model->on_pyobject_heap_alloc(cd, unn);
                 }
                 return true;
             }
@@ -750,8 +768,9 @@ namespace ana
                 if (cd.get_lhs_type())
                 {
                     const svalue *ptr_sval = mgr->get_ptr_svalue(cd.get_lhs_type(), new_pylong_region);
+                      // const svalue *unn = mgr->get_or_create_unmergeable(ptr_sval);
                     cd.maybe_set_lhs(ptr_sval);
-                    model->on_pyobject_heap_alloc(cd, ptr_sval);
+                    // model->on_pyobject_heap_alloc(cd, unn);
                 }
                 return true;
             }
@@ -831,7 +850,7 @@ namespace ana
     {
         ana::plugin_analyzer_init_iface *iface = (ana::plugin_analyzer_init_iface *)gcc_data;
         LOG_SCOPE(iface->get_logger());
-        if (1)
+        if (0)
             inform(input_location, "got here: cpython_analyzer_init_cb");
 
         initialize_globals();
@@ -842,8 +861,8 @@ namespace ana
                                        make_unique<kf_PyLong_FromLong>());
         // PyDECREF is a macro that goes to _Py_DECREF in python 3.9 but Py_DECREF in latest
         // do _Py_Dealloc // check if this works in python 3.11 as well
-        iface->register_known_function("_Py_Dealloc",
-                                       make_unique<kf_Py_Dealloc>());
+        // iface->register_known_function("_Py_Dealloc",
+                                      //  make_unique<kf_Py_Dealloc>());
         iface->register_known_function("PyList_New",
                                        make_unique<kf_PyList_New>());
         iface->register_known_function("PyList_Append",
@@ -858,7 +877,7 @@ int plugin_init(struct plugin_name_args *plugin_info,
 {
 #if ENABLE_ANALYZER
     const char *plugin_name = plugin_info->base_name;
-    if (1)
+    if (0)
         inform(input_location, "got here; %qs", plugin_name);
     register_callback(plugin_info->base_name,
                       PLUGIN_ANALYZER_INIT,

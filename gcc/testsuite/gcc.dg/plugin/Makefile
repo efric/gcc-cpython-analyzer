@@ -6,7 +6,7 @@ GCC_DIR = /home/flappy/gcc_/gcc/gcc
 GCCPLUGINS_DIR:= $(shell $(TARGET_GCC) -print-file-name=plugin)
 CXXFLAGS+= -I$(GCC_DIR) -I$(GCCPLUGINS_DIR)/include -fPIC -fno-rtti -g
 
-cpython_plugin.so: $(CPYTHON_SOURCE_FILES)
+analyzer_cpython_plugin.so: $(CPYTHON_SOURCE_FILES)
 	$(HOST_GCC) -shared $(CXXFLAGS) $^ -o $@
 
 kernel_plugin.so: $(KERNEL_SOURCE_FILES)
