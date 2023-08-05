@@ -247,12 +247,37 @@ namespace ana
                     }
                 }
 
-                if (ob_item_ptr_sval->get_kind() != SK_REGION)
-                {
-                    return false;
-                }
+                // if (ob_item_ptr_sval->get_kind() != SK_REGION)
+                // {
+                //     return false;
+                // }
+                const unmergeable_svalue *underlying_svalue
+                    = ob_item_ptr_sval->dyn_cast_unmergeable_svalue ();
+                const svalue *target_svalue = nullptr;
+                const region_svalue *target_region_svalue = nullptr;
 
-                const region *curr_reg = ob_item_ptr_sval->dyn_cast_region_svalue()->get_pointee();
+                if (underlying_svalue)
+                  {
+                    target_svalue = underlying_svalue->get_arg ();
+                    if (target_svalue->get_kind () != SK_REGION)
+                      {
+                        return false;
+                      }
+                  }
+                else
+                  {
+                    if (ob_item_ptr_sval->get_kind () != SK_REGION)
+                      {
+                        return false;
+                      }
+                    target_svalue = ob_item_ptr_sval;
+                  }
+
+                target_region_svalue
+                    = target_svalue->dyn_cast_region_svalue ();
+                const region *curr_reg = target_region_svalue->get_pointee ();
+
+                // const region *curr_reg = ob_item_ptr_sval->dyn_cast_region_svalue()->get_pointee();
 
                 if (compat_types_p(num_allocated_bytes->get_type(), size_type_node))
                     model->set_dynamic_extents(curr_reg, num_allocated_bytes, ctxt);
