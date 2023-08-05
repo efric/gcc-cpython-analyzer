@@ -523,13 +523,13 @@ namespace ana
                 // maybe_get_constant might return NULL_TREE which will then not give us right result
                 // TODO: add some extra check here
 
-                // if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node))
-                // {
-                //     const svalue *null_sval = mgr->get_or_create_null_ptr(TREE_TYPE(ob_item_field));
-                //     model->set_value(ob_item_region, null_sval, cd.get_ctxt());
-                // }
-                // else // calloc
-                // {
+                if (tree_int_cst_equal(size_cond_sval->maybe_get_constant(), integer_one_node))
+                {
+                    const svalue *null_sval = mgr->get_or_create_null_ptr(pyobj_ptr_ptr);
+                    model->set_value(ob_item_region, null_sval, cd.get_ctxt());
+                }
+                else // calloc
+                {
                 const svalue *sizeof_sval = mgr->get_or_create_cast(size_sval->get_type(), get_sizeof_pyobjptr(mgr));
                 const svalue *prod_sval = mgr->get_or_create_binop(size_type_node, MULT_EXPR,
                                                                    sizeof_sval, size_sval);
@@ -542,7 +542,7 @@ namespace ana
                 const svalue *ob_item_ptr_sval = mgr->get_ptr_svalue(pyobj_ptr_ptr, ob_item_sized_region3);
                 const svalue *ob_item_unmergeable = mgr->get_or_create_unmergeable(ob_item_ptr_sval);
                 model->set_value(ob_item_region, ob_item_unmergeable, cd.get_ctxt());
-                // }
+                }
 
                 /*
                 typedef struct {
