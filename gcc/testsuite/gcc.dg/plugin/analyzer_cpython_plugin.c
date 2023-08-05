@@ -120,10 +120,13 @@ namespace ana
         const region *ob_type_region = mgr->get_field_region(pylist_reg, ob_type_field);
         const svalue *stored_sval = model->get_store_value(ob_type_region, cd.get_ctxt());
         const region *pylist_type_region = mgr->get_region_for_global(pylisttype_vardecl);
-        const svalue *pylist_type_ptr = mgr->get_ptr_svalue(TREE_TYPE(pylisttype_vardecl), pylist_type_region);
+        tree pylisttype_vardecl_ptr
+            = build_pointer_type (TREE_TYPE (pylisttype_vardecl));
+        const svalue *pylist_type_ptr = mgr->get_ptr_svalue(pylisttype_vardecl_ptr, pylist_type_region);
 
-        const unaryop_svalue *unwrapped_sval = stored_sval->dyn_cast_unaryop_svalue();
-        if (!unwrapped_sval || unwrapped_sval->get_arg() != pylist_type_ptr)
+        // const unaryop_svalue *unwrapped_sval = stored_sval->dyn_cast_unaryop_svalue();
+        // if (!unwrapped_sval || unwrapped_sval->get_arg() != pylist_type_ptr)
+        if (stored_sval != pylist_type_ptr)
         {
             // emit diagnostic -Wanalyzer-type-error
             cd.get_ctxt()->terminate_path();
@@ -544,7 +547,10 @@ namespace ana
 
                 // get pointer svalue for PyList_Type then assign it to ob_type field.
                 const region *pylist_type_region = mgr->get_region_for_global(pylisttype_vardecl);
-                const svalue *pylist_type_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(pylisttype_vardecl), pylist_type_region);
+                tree pylisttype_vardecl_ptr
+                    = build_pointer_type (TREE_TYPE (pylisttype_vardecl));
+                const svalue *pylist_type_ptr_sval = mgr->get_ptr_svalue (
+                    pylisttype_vardecl_ptr, pylist_type_region);
                 tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
                 const region *ob_type_region = mgr->get_field_region(ob_base_region, ob_type_field);
                 model->set_value(ob_type_region, pylist_type_ptr_sval, cd.get_ctxt());
@@ -630,6 +636,8 @@ namespace ana
 
                 const svalue *pyobj_svalue = mgr->get_or_create_unknown_svalue(pyobj_record);
                 const svalue *pylong_svalue = mgr->get_or_create_unknown_svalue(pylongobj_record);
+                 tree pylongtype_vardecl_ptr
+                    = build_pointer_type (TREE_TYPE (pylongtype_vardecl));
 
                 // // Create a new region for PyLongObject.
                 // tree tp_basicsize_field = get_field_by_name(pylongtype_vardecl, "tp_basicsize");
@@ -655,7 +663,7 @@ namespace ana
 
                 // get pointer svalue for PyLong_Type then assign it to ob_type field.
                 const region *pylong_type_region = mgr->get_region_for_global(pylongtype_vardecl);
-                const svalue *pylong_type_ptr_sval = mgr->get_ptr_svalue(TREE_TYPE(pylongtype_vardecl), pylong_type_region);
+                const svalue *pylong_type_ptr_sval = mgr->get_ptr_svalue(pylongtype_vardecl_ptr, pylong_type_region);
                 tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
                 const region *ob_type_region = mgr->get_field_region(ob_base_region, ob_type_field);
                 model->set_value(ob_type_region, pylong_type_ptr_sval, cd.get_ctxt());
