@@ -115,6 +115,11 @@ namespace ana
                                                         cd.get_arg_tree(0),
                                                         cd.get_ctxt());
 
+        if (pylist_sval->get_kind () != SK_REGION
+            && pylist_sval->get_kind () != SK_CONSTANT)
+          {
+            return;
+          }
         // PyList_Check
         tree ob_type_field = get_field_by_name(pyobj_record, "ob_type");
         const region *ob_type_region = mgr->get_field_region(pylist_reg, ob_type_field);
