@@ -531,8 +531,8 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
       const svalue *tp_basicsize_sval
           = mgr->get_or_create_unknown_svalue (NULL);
       const region *pylist_region
-          = model->get_or_create_region_for_heap_alloc (tp_basicsize_sval,
-                                                        cd.get_ctxt ());
+          = model->get_or_create_region_for_heap_alloc (
+              tp_basicsize_sval, cd.get_ctxt (), true, &cd);
       model->set_value (pylist_region, pylist_svalue, cd.get_ctxt ());
 
       /*
@@ -573,12 +573,12 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
               size_sval->get_type (), get_sizeof_pyobjptr (mgr));
           const svalue *prod_sval = mgr->get_or_create_binop (
               size_type_node, MULT_EXPR, sizeof_sval, size_sval);
-          const region *ob_item_sized_region3
+          const region *ob_item_sized_region
               = model->get_or_create_region_for_heap_alloc (prod_sval,
                                                             cd.get_ctxt ());
-          model->zero_fill_region (ob_item_sized_region3);
+          model->zero_fill_region (ob_item_sized_region);
           const svalue *ob_item_ptr_sval
-              = mgr->get_ptr_svalue (pyobj_ptr_ptr, ob_item_sized_region3);
+              = mgr->get_ptr_svalue (pyobj_ptr_ptr, ob_item_sized_region);
           const svalue *ob_item_unmergeable
               = mgr->get_or_create_unmergeable (ob_item_ptr_sval);
           model->set_value (ob_item_region, ob_item_unmergeable,
@@ -633,7 +633,6 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
           const svalue *ptr_sval
               = mgr->get_ptr_svalue (cd.get_lhs_type (), pylist_region);
           cd.maybe_set_lhs (ptr_sval);
-          // model->on_pyobject_heap_alloc (cd, ptr_sval);
         }
       return true;
     }
@@ -712,8 +711,8 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
       const svalue *tp_basicsize_sval
           = mgr->get_or_create_unknown_svalue (NULL);
       const region *new_pylong_region
-          = model->get_or_create_region_for_heap_alloc (tp_basicsize_sval,
-                                                        cd.get_ctxt ());
+          = model->get_or_create_region_for_heap_alloc (
+              tp_basicsize_sval, cd.get_ctxt (), true, &cd);
       model->set_value (new_pylong_region, pylongobj_sval, cd.get_ctxt ());
 
       // Create a region for the base PyObject within the PyLongObject.
@@ -751,7 +750,6 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
           const svalue *ptr_sval
               = mgr->get_ptr_svalue (cd.get_lhs_type (), new_pylong_region);
           cd.maybe_set_lhs (ptr_sval);
-          // model->on_pyobject_heap_alloc (cd, ptr_sval);
         }
       return true;
     }

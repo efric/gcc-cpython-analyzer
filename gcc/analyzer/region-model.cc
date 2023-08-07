@@ -77,6 +77,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "analyzer/checker-event.h"
 #include "analyzer/checker-path.h"
 #include "analyzer/feasible-graph.h"
+#include "analyzer/call-info.h"
 
 #if ENABLE_ANALYZER
 
@@ -5056,7 +5057,9 @@ region_model::check_dynamic_size_for_floats (const svalue *size_in_bytes,
 
 const region *
 region_model::get_or_create_region_for_heap_alloc (const svalue *size_in_bytes,
-						   region_model_context *ctxt)
+                                                   region_model_context *ctxt,
+                                                   bool register_alloc,
+                                                   const call_details *cd)
 {
   /* Determine which regions are referenced in this region_model, so that
      we can reuse an existing heap_allocated_region if it's not in use on
@@ -5078,6 +5081,17 @@ region_model::get_or_create_region_for_heap_alloc (const svalue *size_in_bytes,
   if (size_in_bytes)
     if (compat_types_p (size_in_bytes->get_type (), size_type_node))
       set_dynamic_extents (reg, size_in_bytes, ctxt);
+
+  if (register_alloc && cd)
+    {
+      const svalue *ptr_sval = nullptr;
+      if (cd->get_lhs_type ())
+        ptr_sval = m_mgr->get_ptr_svalue (cd->get_lhs_type (), reg);
+      else
+        ptr_sval = m_mgr->get_ptr_svalue (NULL_TREE, reg);
+      move_ptr_sval_non_null (ctxt, ptr_sval);
+    }
+
   return reg;
 }
 
