@@ -77,7 +77,6 @@ along with GCC; see the file COPYING3.  If not see
 #include "analyzer/checker-event.h"
 #include "analyzer/checker-path.h"
 #include "analyzer/feasible-graph.h"
-#include "analyzer/call-info.h"
 
 #if ENABLE_ANALYZER
 
