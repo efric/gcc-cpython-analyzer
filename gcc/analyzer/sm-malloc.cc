@@ -437,6 +437,10 @@ public:
   void move_ptr_sval_non_null (region_model *model, sm_state_map *smap,
                                const svalue *new_ptr_sval,
                                const extrinsic_state &ext_state) const;
+  
+  void move_ptr_sval_free (region_model *model, sm_state_map *smap,
+                               const svalue *new_ptr_sval,
+                               const extrinsic_state &ext_state) const;
 
   standard_deallocator_set m_free;
   standard_deallocator_set m_scalar_delete;
@@ -2512,10 +2516,19 @@ on_realloc_with_move (region_model *model,
     ptr_sval to mark a newly created region as assumed non null on malloc SM */
 void
 malloc_state_machine::move_ptr_sval_non_null (
-    region_model *model, sm_state_map *smap, const svalue *new_ptr_sval,
+    region_model *model, sm_state_map *smap, const svalue *ptr_sval,
     const extrinsic_state &ext_state) const
 {
-  smap->set_state (model, new_ptr_sval, m_free.m_nonnull, NULL, ext_state);
+  smap->set_state (model, ptr_sval, m_free.m_nonnull, NULL, ext_state);
+}
+
+void
+malloc_state_machine::move_ptr_sval_free (
+    region_model *model, sm_state_map *smap, const svalue *ptr_sval,
+    const extrinsic_state &ext_state) const
+{
+  smap->set_state (model, ptr_sval, m_free.m_deallocator.m_freed, NULL,
+                   ext_state);
 }
 
 } // anonymous namespace
@@ -2586,6 +2599,30 @@ region_model::move_ptr_sval_non_null (region_model_context *ctxt,
   const malloc_state_machine &malloc_sm = (const malloc_state_machine &)*sm;
 
   malloc_sm.move_ptr_sval_non_null (this, smap, ptr_sval, *ext_state);
+}
+
+void
+region_model::move_ptr_sval_free (region_model_context *ctxt,
+                                      const svalue *ptr_sval)
+{
+  if (!ctxt)
+    return;
+  const extrinsic_state *ext_state = ctxt->get_ext_state ();
+  if (!ext_state)
+    return;
+
+  sm_state_map *smap;
+  const state_machine *sm;
+  unsigned sm_idx;
+  if (!ctxt->get_malloc_map (&smap, &sm, &sm_idx))
+    return;
+
+  gcc_assert (smap);
+  gcc_assert (sm);
+
+  const malloc_state_machine &malloc_sm = (const malloc_state_machine &)*sm;
+
+  malloc_sm.move_ptr_sval_free (this, smap, ptr_sval, *ext_state);
 }
 
 } // namespace ana

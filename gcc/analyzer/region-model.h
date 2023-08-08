@@ -479,6 +479,8 @@ class region_model
   void move_ptr_sval_non_null (region_model_context *ctxt,
                                const svalue *new_ptr_sval);
 
+  void move_ptr_sval_free (region_model_context *ctxt,
+                               const svalue *new_ptr_sval);
   /* Implemented in sm-taint.cc.  */
   void mark_as_tainted (const svalue *sval,
 			region_model_context *ctxt);

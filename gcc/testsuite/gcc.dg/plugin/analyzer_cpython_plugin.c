@@ -763,6 +763,45 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
     }
 }
 
+class kf_Py_Dealloc : public known_function
+{
+public:
+  bool
+  matches_call_types_p (const call_details &cd) const final override
+  {
+    return (cd.num_args () == 1); // TODO: more checks
+  }
+  void impl_call_post (const call_details &) const final override;
+};
+
+void
+kf_Py_Dealloc::impl_call_post (const call_details &cd) const
+{
+  region_model *model = cd.get_model ();
+  region_model_manager *mgr = cd.get_manager ();
+
+  const svalue *pyobj_sval = cd.get_arg_svalue (0);
+  const region *pyobj_reg = pyobj_sval->maybe_get_region ();
+
+  // check to see if already deallocated/skip for now if unknown
+  if (!pyobj_reg)
+    return;
+
+  tree ob_refcnt_tree = get_field_by_name (pyobj_record, "ob_refcnt");
+  const region *ob_refcnt_region
+      = mgr->get_field_region (pyobj_reg, ob_refcnt_tree);
+  const svalue *ob_refcnt_sval
+      = model->get_store_value (ob_refcnt_region, cd.get_ctxt ());
+
+  if (tree_int_cst_equal (ob_refcnt_sval->maybe_get_constant (),
+                          integer_zero_node))
+    {
+      model->move_ptr_sval_free (cd.get_ctxt (), pyobj_sval);
+      model->unbind_region_and_descendents (pyobj_reg, POISON_KIND_FREED);
+      model->unset_dynamic_extents (pyobj_reg);
+    }
+}
+
 static void
 maybe_stash_named_type (logger *logger, const translation_unit &tu,
                         const char *name)
@@ -898,6 +937,8 @@ cpython_analyzer_init_cb (void *gcc_data, void * /*user_data */)
   iface->register_known_function ("PyList_New", make_unique<kf_PyList_New> ());
   iface->register_known_function ("PyList_Append",
                                   make_unique<kf_PyList_Append> ());
+  iface->register_known_function ("_Py_Dealloc",
+                                  make_unique<kf_Py_Dealloc> ());
 }
 } // namespace ana
 
