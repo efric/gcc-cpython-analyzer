@@ -12559,3 +12559,28 @@ proc check_effective_target_const_volatile_readonly_section { } {
     }
   return 1
 }
+
+proc dg-require-python-h { } {
+    puts "ENTER dg-require-python-h" ; 
+    set result [remote_exec host "python3-config --cflags"]
+    set status [lindex $result 0]
+    if { $status == 0 } {
+        set python_flags [lindex $result 1]
+    } else {
+        set python_flags "UNSUPPORTED"
+    }
+    
+    puts "Python flags are: $python_flags" ;
+
+    # Check if Python flags are unsupported
+    if { $python_flags eq "UNSUPPORTED" } {
+        puts "Python flags are unsupported" ;
+        error "Python flags are unsupported"
+        return
+    }
+
+    upvar dg-extra-tool-flags extra-tool-flags
+    puts "Before appending, extra-tool-flags: $extra-tool-flags" ;
+    eval lappend extra-tool-flags $python_flags
+    puts "After appending, extra-tool-flags: $extra-tool-flags" ;
+}
