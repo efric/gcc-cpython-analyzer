@@ -200,6 +200,12 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
       const svalue *null_sval = mgr->get_or_create_null_ptr (pyobj_ptr_ptr);
       model->set_value (ob_item_reg, null_sval, cd.get_ctxt ());
 
+      if (cd.get_lhs_type ())
+        {
+          const svalue *neg_one
+              = mgr->get_or_create_int_cst (cd.get_lhs_type (), -1);
+          model->set_value (cd.get_lhs_region (), neg_one, cd.get_ctxt ());
+        }
       return true;
     }
   };
@@ -313,6 +319,12 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
           size_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
       model->set_value (ob_refcnt_region, new_refcnt_sval, cd.get_ctxt ());
 
+      if (cd.get_lhs_type ())
+        {
+          const svalue *zero
+              = mgr->get_or_create_int_cst (cd.get_lhs_type (), 0);
+          model->set_value (cd.get_lhs_region (), zero, cd.get_ctxt ());
+        }
       return true;
     }
   };
@@ -427,6 +439,12 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
           size_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
       model->set_value (ob_refcnt_region, new_refcnt_sval, cd.get_ctxt ());
 
+      if (cd.get_lhs_type ())
+        {
+          const svalue *zero
+              = mgr->get_or_create_int_cst (cd.get_lhs_type (), 0);
+          model->set_value (cd.get_lhs_region (), zero, cd.get_ctxt ());
+        }
       return true;
     }
 
