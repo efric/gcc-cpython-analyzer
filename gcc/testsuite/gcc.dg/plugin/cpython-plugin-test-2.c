@@ -1,8 +1,6 @@
 /* { dg-do compile } */
-/* { dg-options "-fanalyzer" } */
+/* { dg-options "-fanalyzer -I/usr/include/python3.9" } */
 /* { dg-require-effective-target analyzer } */
-/* { dg-additional-options "-I/usr/include/python3.9" } */
-/* { dg-require-python-h } */
 
 
 #define PY_SSIZE_T_CLEAN
