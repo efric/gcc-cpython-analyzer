@@ -1,7 +1,7 @@
 /* { dg-do compile } */
-/* { dg-options "-fanalyzer" } */
-/* { dg-require-python-h } */
 /* { dg-require-effective-target analyzer } */
+/* { dg-options "-fanalyzer" } */
+/* { dg-require-python-h "" } */
 
 
 #define PY_SSIZE_T_CLEAN
