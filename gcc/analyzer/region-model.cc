@@ -5127,12 +5127,15 @@ region_model::check_dynamic_size_for_floats (const svalue *size_in_bytes,
    Use CTXT to complain about tainted sizes.
 
    Reuse an existing heap_allocated_region if it's not being referenced by
-   this region_model; otherwise create a new one.  */
+   this region_model; otherwise create a new one.
+   
+   Optionally (update_state_machine) transitions the pointer pointing to the 
+   heap_allocated_region from start to assumed non-null. */
 
 const region *
 region_model::get_or_create_region_for_heap_alloc (const svalue *size_in_bytes,
        region_model_context *ctxt,
-       bool register_alloc,
+       bool update_state_machine,
        const call_details *cd)
 {
   /* Determine which regions are referenced in this region_model, so that
@@ -5163,7 +5166,7 @@ region_model::get_or_create_region_for_heap_alloc (const svalue *size_in_bytes,
        ptr_sval = m_mgr->get_ptr_svalue (cd->get_lhs_type (), reg);
 			else
        ptr_sval = m_mgr->get_ptr_svalue (NULL_TREE, reg);
-			move_ptr_sval_non_null (ctxt, ptr_sval);
+			transition_ptr_sval_non_null (ctxt, ptr_sval);
 		}
 
   return reg;

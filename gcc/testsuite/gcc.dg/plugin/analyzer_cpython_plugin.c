@@ -92,6 +92,78 @@ arg_is_long_p (const call_details &cd, unsigned idx)
   return types_compatible_p (cd.get_arg_type (idx), long_integer_type_node);
 }
 
+static void
+init_ob_refcnt_field (region_model_manager *mgr, region_model *model,
+                      const region *ob_base_region, tree pyobj_record,
+                      const call_details &cd)
+{
+  tree ob_refcnt_tree = get_field_by_name (pyobj_record, "ob_refcnt");
+  const region *ob_refcnt_region
+      = mgr->get_field_region (ob_base_region, ob_refcnt_tree);
+  const svalue *refcnt_one_sval
+      = mgr->get_or_create_int_cst (size_type_node, 1);
+  model->set_value (ob_refcnt_region, refcnt_one_sval, cd.get_ctxt ());
+}
+
+static void
+set_ob_type_field (region_model_manager *mgr, region_model *model,
+                   const region *ob_base_region, tree pyobj_record,
+                   tree pytype_var_decl_ptr, const call_details &cd)
+{
+  const region *pylist_type_region
+      = mgr->get_region_for_global (pytype_var_decl_ptr);
+  tree pytype_var_decl_ptr_type
+      = build_pointer_type (TREE_TYPE (pytype_var_decl_ptr));
+  const svalue *pylist_type_ptr_sval
+      = mgr->get_ptr_svalue (pytype_var_decl_ptr_type, pylist_type_region);
+  tree ob_type_field = get_field_by_name (pyobj_record, "ob_type");
+  const region *ob_type_region
+      = mgr->get_field_region (ob_base_region, ob_type_field);
+  model->set_value (ob_type_region, pylist_type_ptr_sval, cd.get_ctxt ());
+}
+
+static const region *
+get_ob_base_field (region_model_manager *mgr, region_model *model,
+                   const region *new_object_region, tree object_record,
+                   const svalue *pyobj_svalue, const call_details &cd)
+{
+  tree ob_base_tree = get_field_by_name (object_record, "ob_base");
+  const region *ob_base_region
+      = mgr->get_field_region (new_object_region, ob_base_tree);
+  model->set_value (ob_base_region, pyobj_svalue, cd.get_ctxt ());
+  return ob_base_region;
+}
+
+static const region *
+init_pyobject_region (region_model_manager *mgr, region_model *model,
+                      const svalue *object_svalue, const call_details &cd)
+{
+  /* TODO: switch to actual tp_basic_size */
+  const svalue *tp_basicsize_sval = mgr->get_or_create_unknown_svalue (NULL);
+  const region *pyobject_region = model->get_or_create_region_for_heap_alloc (
+      tp_basicsize_sval, cd.get_ctxt (), true, &cd);
+  model->set_value (pyobject_region, object_svalue, cd.get_ctxt ());
+  return pyobject_region;
+}
+
+static const svalue *
+increment_field_value (region_model_manager *mgr, region_model *model,
+                       const region *base_region, const tree record,
+                       const char *field_name, const tree type_node,
+                       const call_details &cd)
+{
+  tree field_tree = get_field_by_name (record, field_name);
+  const region *field_region = mgr->get_field_region (base_region, field_tree);
+  const svalue *old_sval
+      = model->get_store_value (field_region, cd.get_ctxt ());
+  const svalue *one_sval = mgr->get_or_create_int_cst (type_node, 1);
+  const svalue *new_sval
+      = mgr->get_or_create_binop (type_node, PLUS_EXPR, old_sval, one_sval);
+  model->set_value (field_region, new_sval, cd.get_ctxt ());
+
+  return new_sval;
+}
+
 class kf_PyList_Append : public known_function
 {
 public:
@@ -165,10 +237,10 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
 
   /* Concrete custom_edge_info: a realloc call that fails, returning NULL.
    */
-  class append_realloc_failure : public failed_call_info
+  class realloc_failure : public failed_call_info
   {
   public:
-    append_realloc_failure (const call_details &cd) : failed_call_info (cd) {}
+    realloc_failure (const call_details &cd) : failed_call_info (cd) {}
 
     bool
     update_model (region_model *model, const exploded_edge *,
@@ -468,7 +540,7 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
   /* Body of kf_PyList_Append::impl_call_post.  */
   if (cd.get_ctxt ())
     {
-      cd.get_ctxt ()->bifurcate (make_unique<append_realloc_failure> (cd));
+      cd.get_ctxt ()->bifurcate (make_unique<realloc_failure> (cd));
       cd.get_ctxt ()->bifurcate (make_unique<realloc_success_no_move> (cd));
       cd.get_ctxt ()->bifurcate (make_unique<realloc_success_move> (cd));
       cd.get_ctxt ()->terminate_path ();
@@ -539,12 +611,8 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
 
       const svalue *size_sval = cd.get_arg_svalue (0);
 
-      const svalue *tp_basicsize_sval
-          = mgr->get_or_create_unknown_svalue (NULL);
       const region *pylist_region
-          = model->get_or_create_region_for_heap_alloc (
-              tp_basicsize_sval, cd.get_ctxt (), true, &cd);
-      model->set_value (pylist_region, pylist_svalue, cd.get_ctxt ());
+          = init_pyobject_region (mgr, model, pylist_svalue, cd);
 
       /*
       typedef struct
@@ -602,10 +670,8 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
       Py_ssize_t ob_size; // Number of items in variable part
       } PyVarObject;
       */
-      tree ob_base_tree = get_field_by_name (varobj_record, "ob_base");
-      const region *ob_base_region
-          = mgr->get_field_region (varobj_region, ob_base_tree);
-      model->set_value (ob_base_region, pyobj_svalue, cd.get_ctxt ());
+      const region *ob_base_region = get_ob_base_field (
+          mgr, model, varobj_region, varobj_record, pyobj_svalue, cd);
 
       tree ob_size_tree = get_field_by_name (varobj_record, "ob_size");
       const region *ob_size_region
@@ -620,24 +686,11 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
       } PyObject;
       */
 
-      tree ob_refcnt_tree = get_field_by_name (pyobj_record, "ob_refcnt");
-      const region *ob_refcnt_region
-          = mgr->get_field_region (ob_base_region, ob_refcnt_tree);
-      const svalue *refcnt_one_sval
-          = mgr->get_or_create_int_cst (size_type_node, 1);
-      model->set_value (ob_refcnt_region, refcnt_one_sval, cd.get_ctxt ());
+      // initialize ob_refcnt field to 1
+      init_ob_refcnt_field(mgr, model, ob_base_region, pyobj_record, cd);
 
       // get pointer svalue for PyList_Type then assign it to ob_type field.
-      const region *pylist_type_region
-          = mgr->get_region_for_global (pylisttype_vardecl);
-      tree pylisttype_vardecl_ptr
-          = build_pointer_type (TREE_TYPE (pylisttype_vardecl));
-      const svalue *pylist_type_ptr_sval
-          = mgr->get_ptr_svalue (pylisttype_vardecl_ptr, pylist_type_region);
-      tree ob_type_field = get_field_by_name (pyobj_record, "ob_type");
-      const region *ob_type_region
-          = mgr->get_field_region (ob_base_region, ob_type_field);
-      model->set_value (ob_type_region, pylist_type_ptr_sval, cd.get_ctxt ());
+      set_ob_type_field(mgr, model, ob_base_region, pyobj_record, pylisttype_vardecl, cd);
 
       if (cd.get_lhs_type ())
         {
@@ -716,50 +769,31 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
           = mgr->get_or_create_unknown_svalue (pyobj_record);
       const svalue *pylongobj_sval
           = mgr->get_or_create_unknown_svalue (pylongobj_record);
-      tree pylongtype_vardecl_ptr
-          = build_pointer_type (TREE_TYPE (pylongtype_vardecl));
 
-      const svalue *tp_basicsize_sval
-          = mgr->get_or_create_unknown_svalue (NULL);
-      const region *new_pylong_region
-          = model->get_or_create_region_for_heap_alloc (
-              tp_basicsize_sval, cd.get_ctxt (), true, &cd);
-      model->set_value (new_pylong_region, pylongobj_sval, cd.get_ctxt ());
+      const region *pylong_region
+          = init_pyobject_region (mgr, model, pylongobj_sval, cd);
 
       // Create a region for the base PyObject within the PyLongObject.
-      tree ob_base_tree = get_field_by_name (pylongobj_record, "ob_base");
-      const region *ob_base_region
-          = mgr->get_field_region (new_pylong_region, ob_base_tree);
-      model->set_value (ob_base_region, pyobj_svalue, cd.get_ctxt ());
+      const region *ob_base_region = get_ob_base_field (
+          mgr, model, pylong_region, pylongobj_record, pyobj_svalue, cd);
 
-      tree ob_refcnt_tree = get_field_by_name (pyobj_record, "ob_refcnt");
-      const region *ob_refcnt_region
-          = mgr->get_field_region (ob_base_region, ob_refcnt_tree);
-      const svalue *refcnt_one_sval
-          = mgr->get_or_create_int_cst (size_type_node, 1);
-      model->set_value (ob_refcnt_region, refcnt_one_sval, cd.get_ctxt ());
+      // initialize ob_refcnt field to 1
+      init_ob_refcnt_field(mgr, model, ob_base_region, pyobj_record, cd);
 
       // get pointer svalue for PyLong_Type then assign it to ob_type field.
-      const region *pylong_type_region
-          = mgr->get_region_for_global (pylongtype_vardecl);
-      const svalue *pylong_type_ptr_sval
-          = mgr->get_ptr_svalue (pylongtype_vardecl_ptr, pylong_type_region);
-      tree ob_type_field = get_field_by_name (pyobj_record, "ob_type");
-      const region *ob_type_region
-          = mgr->get_field_region (ob_base_region, ob_type_field);
-      model->set_value (ob_type_region, pylong_type_ptr_sval, cd.get_ctxt ());
+      set_ob_type_field(mgr, model, ob_base_region, pyobj_record, pylongtype_vardecl, cd);
 
       // Set the PyLongObject value.
       tree ob_digit_field = get_field_by_name (pylongobj_record, "ob_digit");
       const region *ob_digit_region
-          = mgr->get_field_region (new_pylong_region, ob_digit_field);
+          = mgr->get_field_region (pylong_region, ob_digit_field);
       const svalue *ob_digit_sval = cd.get_arg_svalue (0);
       model->set_value (ob_digit_region, ob_digit_sval, cd.get_ctxt ());
 
       if (cd.get_lhs_type ())
         {
           const svalue *ptr_sval
-              = mgr->get_ptr_svalue (cd.get_lhs_type (), new_pylong_region);
+              = mgr->get_ptr_svalue (cd.get_lhs_type (), pylong_region);
           cd.maybe_set_lhs (ptr_sval);
         }
       return true;
@@ -910,11 +944,11 @@ cpython_analyzer_init_cb (void *gcc_data, void * /*user_data */)
       return;
     }
 
-  iface->register_known_function ("PyLong_FromLong",
-                                  make_unique<kf_PyLong_FromLong> ());
-  iface->register_known_function ("PyList_New", make_unique<kf_PyList_New> ());
   iface->register_known_function ("PyList_Append",
                                   make_unique<kf_PyList_Append> ());
+  iface->register_known_function ("PyList_New", make_unique<kf_PyList_New> ());
+  iface->register_known_function ("PyLong_FromLong",
+                                  make_unique<kf_PyLong_FromLong> ());
 }
 } // namespace ana
 

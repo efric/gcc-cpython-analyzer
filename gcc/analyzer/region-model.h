@@ -389,7 +389,7 @@ class region_model
 
   const region *get_or_create_region_for_heap_alloc (
       const svalue *size_in_bytes, region_model_context *ctxt,
-      bool register_alloc = false, const call_details *cd = nullptr);
+      bool update_state_machine = false, const call_details *cd = nullptr);
   const region *create_region_for_alloca (const svalue *size_in_bytes,
 					  region_model_context *ctxt);
   void get_referenced_base_regions (auto_bitmap &out_ids) const;
@@ -477,7 +477,7 @@ class region_model
 			     const svalue *new_ptr_sval);
 
   /* Implemented in sm-malloc.cc.  */
-  void move_ptr_sval_non_null (region_model_context *ctxt,
+  void transition_ptr_sval_non_null (region_model_context *ctxt,
        const svalue *new_ptr_sval);
 
   /* Implemented in sm-taint.cc.  */
