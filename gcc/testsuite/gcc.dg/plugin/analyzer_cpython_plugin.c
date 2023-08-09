@@ -123,7 +123,7 @@ set_ob_type_field (region_model_manager *mgr, region_model *model,
 }
 
 static const region *
-get_ob_base_field (region_model_manager *mgr, region_model *model,
+get_ob_base_region (region_model_manager *mgr, region_model *model,
                    const region *new_object_region, tree object_record,
                    const svalue *pyobj_svalue, const call_details &cd)
 {
@@ -146,23 +146,48 @@ init_pyobject_region (region_model_manager *mgr, region_model *model,
   return pyobject_region;
 }
 
-static const svalue *
-increment_field_value (region_model_manager *mgr, region_model *model,
-                       const region *base_region, const tree record,
-                       const char *field_name, const tree type_node,
-                       const call_details &cd)
+static void
+inc_field_val (region_model_manager *mgr, region_model *model,
+               const region *field_region, const tree type_node,
+               const call_details &cd, const svalue **old_sval = nullptr,
+               const svalue **new_sval = nullptr)
 {
-  tree field_tree = get_field_by_name (record, field_name);
-  const region *field_region = mgr->get_field_region (base_region, field_tree);
-  const svalue *old_sval
+  const svalue *tmp_old_sval
       = model->get_store_value (field_region, cd.get_ctxt ());
   const svalue *one_sval = mgr->get_or_create_int_cst (type_node, 1);
-  const svalue *new_sval
-      = mgr->get_or_create_binop (type_node, PLUS_EXPR, old_sval, one_sval);
-  model->set_value (field_region, new_sval, cd.get_ctxt ());
+  const svalue *tmp_new_sval = mgr->get_or_create_binop (
+      type_node, PLUS_EXPR, tmp_old_sval, one_sval);
 
-  return new_sval;
+  model->set_value (field_region, tmp_new_sval, cd.get_ctxt ());
+
+  if (old_sval)
+    *old_sval = tmp_old_sval;
+
+  if (new_sval)
+    *new_sval = tmp_new_sval;
 }
+
+class pyobj_init_fail : public failed_call_info
+{
+public:
+  pyobj_init_fail (const call_details &cd) : failed_call_info (cd) {}
+
+  bool
+  update_model (region_model *model, const exploded_edge *,
+                region_model_context *ctxt) const final override
+  {
+    /* Return NULL; everything else is unchanged. */
+    const call_details cd (get_call_details (model, ctxt));
+    region_model_manager *mgr = cd.get_manager ();
+    if (cd.get_lhs_type ())
+      {
+        const svalue *zero
+            = mgr->get_or_create_int_cst (cd.get_lhs_type (), 0);
+        model->set_value (cd.get_lhs_region (), zero, cd.get_ctxt ());
+      }
+    return true;
+  }
+};
 
 class kf_PyList_Append : public known_function
 {
@@ -215,7 +240,7 @@ kf_PyList_Append::impl_call_pre (const call_details &cd) const
       return;
     }
 
-  // Check that new_item is not null
+  // Check that new_item is not null.
   {
     const svalue *null_ptr
         = mgr->get_or_create_int_cst (newitem_sval->get_type (), 0);
@@ -275,7 +300,7 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
         {
           const svalue *neg_one
               = mgr->get_or_create_int_cst (cd.get_lhs_type (), -1);
-          model->set_value (cd.get_lhs_region (), neg_one, cd.get_ctxt ());
+          cd.maybe_set_lhs(neg_one);
         }
       return true;
     }
@@ -312,12 +337,10 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
       tree ob_size_field = get_field_by_name (varobj_record, "ob_size");
       const region *ob_size_region
           = mgr->get_field_region (pylist_reg, ob_size_field);
-      const svalue *ob_size_sval
-          = model->get_store_value (ob_size_region, cd.get_ctxt ());
-      const svalue *one_sval
-          = mgr->get_or_create_int_cst (integer_type_node, 1);
-      const svalue *new_size_sval = mgr->get_or_create_binop (
-          integer_type_node, PLUS_EXPR, ob_size_sval, one_sval);
+      const svalue *ob_size_sval = nullptr;
+      const svalue *new_size_sval = nullptr;
+      inc_field_val (mgr, model, ob_size_region, integer_type_node, cd,
+                     &ob_size_sval, &new_size_sval);
 
       const svalue *sizeof_sval = mgr->get_or_create_cast (
           ob_size_sval->get_type (), get_sizeof_pyobjptr (mgr));
@@ -377,22 +400,17 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
           = mgr->get_offset_region (curr_reg, pyobj_ptr_ptr, offset_sval);
       model->set_value (element_region, newitem_sval, cd.get_ctxt ());
 
+      // Increment ob_refcnt of appended item.
       tree ob_refcnt_tree = get_field_by_name (pyobj_record, "ob_refcnt");
       const region *ob_refcnt_region
           = mgr->get_field_region (newitem_reg, ob_refcnt_tree);
-      const svalue *curr_refcnt
-          = model->get_store_value (ob_refcnt_region, cd.get_ctxt ());
-      const svalue *refcnt_one_sval
-          = mgr->get_or_create_int_cst (size_type_node, 1);
-      const svalue *new_refcnt_sval = mgr->get_or_create_binop (
-          size_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
-      model->set_value (ob_refcnt_region, new_refcnt_sval, cd.get_ctxt ());
+      inc_field_val (mgr, model, ob_refcnt_region, size_type_node, cd);
 
       if (cd.get_lhs_type ())
         {
           const svalue *zero
               = mgr->get_or_create_int_cst (cd.get_lhs_type (), 0);
-          model->set_value (cd.get_lhs_region (), zero, cd.get_ctxt ());
+          cd.maybe_set_lhs(zero);
         }
       return true;
     }
@@ -427,12 +445,10 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
       tree ob_size_field = get_field_by_name (varobj_record, "ob_size");
       const region *ob_size_region
           = mgr->get_field_region (pylist_reg, ob_size_field);
-      const svalue *old_ob_size_sval
-          = model->get_store_value (ob_size_region, cd.get_ctxt ());
-      const svalue *one_sval
-          = mgr->get_or_create_int_cst (integer_type_node, 1);
-      const svalue *new_ob_size_sval = mgr->get_or_create_binop (
-          integer_type_node, PLUS_EXPR, old_ob_size_sval, one_sval);
+      const svalue *old_ob_size_sval = nullptr;
+      const svalue *new_ob_size_sval = nullptr;
+      inc_field_val (mgr, model, ob_size_region, integer_type_node, cd,
+                     &old_ob_size_sval, &new_ob_size_sval);
 
       const svalue *sizeof_sval = mgr->get_or_create_cast (
           old_ob_size_sval->get_type (), get_sizeof_pyobjptr (mgr));
@@ -495,22 +511,17 @@ kf_PyList_Append::impl_call_post (const call_details &cd) const
           = mgr->get_offset_region (new_reg, pyobj_ptr_ptr, offset_sval);
       model->set_value (element_region, newitem_sval, cd.get_ctxt ());
 
+      // Increment ob_refcnt of appended item.
       tree ob_refcnt_tree = get_field_by_name (pyobj_record, "ob_refcnt");
       const region *ob_refcnt_region
           = mgr->get_field_region (newitem_reg, ob_refcnt_tree);
-      const svalue *curr_refcnt
-          = model->get_store_value (ob_refcnt_region, cd.get_ctxt ());
-      const svalue *refcnt_one_sval
-          = mgr->get_or_create_int_cst (size_type_node, 1);
-      const svalue *new_refcnt_sval = mgr->get_or_create_binop (
-          size_type_node, PLUS_EXPR, curr_refcnt, refcnt_one_sval);
-      model->set_value (ob_refcnt_region, new_refcnt_sval, cd.get_ctxt ());
+      inc_field_val (mgr, model, ob_refcnt_region, size_type_node, cd);
 
       if (cd.get_lhs_type ())
         {
           const svalue *zero
               = mgr->get_or_create_int_cst (cd.get_lhs_type (), 0);
-          model->set_value (cd.get_lhs_region (), zero, cd.get_ctxt ());
+          cd.maybe_set_lhs(zero);
         }
       return true;
     }
@@ -561,28 +572,6 @@ public:
 void
 kf_PyList_New::impl_call_post (const call_details &cd) const
 {
-  class failure : public failed_call_info
-  {
-  public:
-    failure (const call_details &cd) : failed_call_info (cd) {}
-
-    bool
-    update_model (region_model *model, const exploded_edge *,
-                  region_model_context *ctxt) const final override
-    {
-      /* Return NULL; everything else is unchanged.  */
-      const call_details cd (get_call_details (model, ctxt));
-      region_model_manager *mgr = cd.get_manager ();
-      if (cd.get_lhs_type ())
-        {
-          const svalue *zero
-              = mgr->get_or_create_int_cst (cd.get_lhs_type (), 0);
-          model->set_value (cd.get_lhs_region (), zero, cd.get_ctxt ());
-        }
-      return true;
-    }
-  };
-
   class success : public call_info
   {
   public:
@@ -670,7 +659,7 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
       Py_ssize_t ob_size; // Number of items in variable part
       } PyVarObject;
       */
-      const region *ob_base_region = get_ob_base_field (
+      const region *ob_base_region = get_ob_base_region (
           mgr, model, varobj_region, varobj_record, pyobj_svalue, cd);
 
       tree ob_size_tree = get_field_by_name (varobj_record, "ob_size");
@@ -686,10 +675,10 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
       } PyObject;
       */
 
-      // initialize ob_refcnt field to 1
+      // Initialize ob_refcnt field to 1.
       init_ob_refcnt_field(mgr, model, ob_base_region, pyobj_record, cd);
 
-      // get pointer svalue for PyList_Type then assign it to ob_type field.
+      // Get pointer svalue for PyList_Type then assign it to ob_type field.
       set_ob_type_field(mgr, model, ob_base_region, pyobj_record, pylisttype_vardecl, cd);
 
       if (cd.get_lhs_type ())
@@ -704,7 +693,7 @@ kf_PyList_New::impl_call_post (const call_details &cd) const
 
   if (cd.get_ctxt ())
     {
-      cd.get_ctxt ()->bifurcate (make_unique<failure> (cd));
+      cd.get_ctxt ()->bifurcate (make_unique<pyobj_init_fail> (cd));
       cd.get_ctxt ()->bifurcate (make_unique<success> (cd));
       cd.get_ctxt ()->terminate_path ();
     }
@@ -724,28 +713,6 @@ public:
 void
 kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
 {
-  class failure : public failed_call_info
-  {
-  public:
-    failure (const call_details &cd) : failed_call_info (cd) {}
-
-    bool
-    update_model (region_model *model, const exploded_edge *,
-                  region_model_context *ctxt) const final override
-    {
-      /* Return NULL; everything else is unchanged.  */
-      const call_details cd (get_call_details (model, ctxt));
-      region_model_manager *mgr = cd.get_manager ();
-      if (cd.get_lhs_type ())
-        {
-          const svalue *zero
-              = mgr->get_or_create_int_cst (cd.get_lhs_type (), 0);
-          model->set_value (cd.get_lhs_region (), zero, cd.get_ctxt ());
-        }
-      return true;
-    }
-  };
-
   class success : public call_info
   {
   public:
@@ -774,13 +741,13 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
           = init_pyobject_region (mgr, model, pylongobj_sval, cd);
 
       // Create a region for the base PyObject within the PyLongObject.
-      const region *ob_base_region = get_ob_base_field (
+      const region *ob_base_region = get_ob_base_region (
           mgr, model, pylong_region, pylongobj_record, pyobj_svalue, cd);
 
-      // initialize ob_refcnt field to 1
+      // Initialize ob_refcnt field to 1.
       init_ob_refcnt_field(mgr, model, ob_base_region, pyobj_record, cd);
 
-      // get pointer svalue for PyLong_Type then assign it to ob_type field.
+      // Get pointer svalue for PyLong_Type then assign it to ob_type field.
       set_ob_type_field(mgr, model, ob_base_region, pyobj_record, pylongtype_vardecl, cd);
 
       // Set the PyLongObject value.
@@ -802,7 +769,7 @@ kf_PyLong_FromLong::impl_call_post (const call_details &cd) const
 
   if (cd.get_ctxt ())
     {
-      cd.get_ctxt ()->bifurcate (make_unique<failure> (cd));
+      cd.get_ctxt ()->bifurcate (make_unique<pyobj_init_fail> (cd));
       cd.get_ctxt ()->bifurcate (make_unique<success> (cd));
       cd.get_ctxt ()->terminate_path ();
     }
