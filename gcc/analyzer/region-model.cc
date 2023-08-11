@@ -4998,13 +4998,13 @@ region_model::check_dynamic_size_for_floats (const svalue *size_in_bytes,
 
 const region *
 region_model::get_or_create_region_for_heap_alloc (const svalue *size_in_bytes,
-       region_model_context *ctxt,
-       bool update_state_machine,
-       const call_details *cd)
+                                                   region_model_context *ctxt,
+                                                   bool update_state_machine,
+                                                   const call_details *cd)
 {
   /* Determine which regions are referenced in this region_model, so that
-     we can reuse an existing heap_allocated_region if it's not in use on
-     this path.  */
+we can reuse an existing heap_allocated_region if it's not in use on
+this path.  */
   auto_bitmap base_regs_in_use;
   get_referenced_base_regions (base_regs_in_use);
 
@@ -5023,12 +5023,12 @@ region_model::get_or_create_region_for_heap_alloc (const svalue *size_in_bytes,
     if (compat_types_p (size_in_bytes->get_type (), size_type_node))
       set_dynamic_extents (reg, size_in_bytes, ctxt);
 
-	if (update_state_machine && cd)
-		{
-			const svalue *ptr_sval
-			= m_mgr->get_ptr_svalue (cd->get_lhs_type (), reg);
+  if (update_state_machine && cd)
+    {
+      const svalue *ptr_sval
+          = m_mgr->get_ptr_svalue (cd->get_lhs_type (), reg);
       transition_ptr_sval_non_null (ctxt, ptr_sval);
-		}
+    }
 
   return reg;
 }
