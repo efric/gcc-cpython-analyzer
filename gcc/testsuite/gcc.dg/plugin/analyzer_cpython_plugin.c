@@ -198,10 +198,10 @@ is_heap_allocated (const region *base_reg)
   return base_reg->get_kind () == RK_HEAP_ALLOCATED;
 }
 
-/* Increments the reference count if the current region matches the base
+/* Increments the actual reference count if the current region matches the base
  * region. */
 void
-increment_refcnt_if_base_matches (const region *curr_region,
+increment_count_if_base_matches (const region *curr_region,
 				  const region *base_reg, int &actual_refcnt)
 {
   if (curr_region->get_base_region () == base_reg)
@@ -262,7 +262,7 @@ count_actual_references (const region_model *model, region_model_manager *mgr,
 	  if (!curr_region || curr_region->get_kind () != RK_HEAP_ALLOCATED)
 	    continue;
 
-	  increment_refcnt_if_base_matches (curr_region, base_reg,
+	  increment_count_if_base_matches (curr_region, base_reg,
 					    actual_refcnt);
 
 	  const region *ob_type_region
