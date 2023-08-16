@@ -4756,6 +4756,21 @@ region_model::get_current_function () const
   return frame->get_function ();
 }
 
+void
+region_model::add_observer (pop_frame_observer *observer)
+{
+  observers.safe_push (observer);
+}
+
+void
+region_model::notify_on_pop_frame_observers (const svalue *retval,
+			       region_model_context *ctxt) const
+{
+  for (auto const &observer : observers)
+    {
+      observer->notify_pop_frame (*this, retval, ctxt);
+    }
+}
 /* Pop the topmost frame_region from this region_model's stack;
 
    If RESULT_LVALUE is non-null, copy any return value from the frame
@@ -4813,6 +4828,7 @@ region_model::pop_frame (tree result_lvalue,
     }
 
   unbind_region_and_descendents (frame_reg,POISON_KIND_POPPED_STACK);
+  notify_on_pop_frame_observers(retval, ctxt);
 }
 
 /* Get the number of frames in this region_model's stack.  */

@@ -16,6 +16,7 @@ General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with GCC; see the file COPYING3.  If not see
+#include "analyzer/region-model.h"
 <http://www.gnu.org/licenses/>.  */
 
 #ifndef GCC_ANALYZER_REGION_MODEL_H
@@ -235,6 +236,15 @@ public:
 };
 
 struct append_regions_cb_data;
+
+class pop_frame_observer
+{
+public:
+  virtual ~pop_frame_observer () = default;
+
+  virtual void notify_pop_frame (const region_model &model, const svalue *retval,
+			     region_model_context *ctxt) = 0;
+};
 
 /* A region_model encapsulates a representation of the state of memory, with
    a tree of regions, along with their associated values.
@@ -591,6 +601,12 @@ private:
   void check_external_function_for_access_attr (const gcall *call,
 						tree callee_fndecl,
 						region_model_context *ctxt) const;
+
+  void add_observer(pop_frame_observer *observer);
+  void notify_on_pop_frame_observers (const svalue *retval,
+				      region_model_context *ctxt) const;
+
+  auto_delete_vec<pop_frame_observer> observers;
 
   /* Storing this here to avoid passing it around everywhere.  */
   region_model_manager *const m_mgr;

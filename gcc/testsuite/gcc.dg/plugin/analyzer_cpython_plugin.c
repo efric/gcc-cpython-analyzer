@@ -191,6 +191,17 @@ public:
   }
 };
 
+class pyobj_refcnt_observer : public pop_frame_observer
+{
+public:
+  void
+  notify_pop_frame (const region_model &model, const svalue *retval,
+		region_model_context *ctxt) override
+  {
+    inform(UNKNOWN_LOCATION, "hi");
+  }
+};
+
 /* Some concessions were made to
 simplify the analysis process when comparing kf_PyList_Append with the
 real implementation. In particular, PyList_Append performs some
