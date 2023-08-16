@@ -236,6 +236,10 @@ public:
 
 struct append_regions_cb_data;
 
+typedef void (*pop_frame_callback) (const region_model *model,
+				    const svalue *retval,
+				    region_model_context *ctxt);
+
 /* A region_model encapsulates a representation of the state of memory, with
    a tree of regions, along with their associated values.
    The representation is graph-like because values can be pointers to
@@ -505,6 +509,20 @@ class region_model
   void check_for_null_terminated_string_arg (const call_details &cd,
 					     unsigned idx);
 
+  static void
+  register_pop_frame_callback (const pop_frame_callback &callback)
+  {
+    pop_frame_callbacks.safe_push (callback);
+  }
+
+  static void
+  notify_on_pop_frame (const region_model *model, const svalue *retval,
+		       region_model_context *ctxt)
+  {
+    for (auto &callback : pop_frame_callbacks)
+	callback (model, retval, ctxt);
+  }
+
 private:
   const region *get_lvalue_1 (path_var pv, region_model_context *ctxt) const;
   const svalue *get_rvalue_1 (path_var pv, region_model_context *ctxt) const;
@@ -592,6 +610,7 @@ private:
 						tree callee_fndecl,
 						region_model_context *ctxt) const;
 
+  static auto_vec<pop_frame_callback> pop_frame_callbacks;
   /* Storing this here to avoid passing it around everywhere.  */
   region_model_manager *const m_mgr;
 
