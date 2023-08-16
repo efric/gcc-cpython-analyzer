@@ -254,9 +254,9 @@ count_actual_references (const region_model *model, region_model_manager *mgr,
   int actual_refcnt = 0;
   for (const auto &other_cluster : *model->get_store ())
     {
-      for (const auto &a_cluster : other_cluster.second->get_map ())
+      for (const auto &binding : other_cluster.second->get_map ())
 	{
-	  const auto &sval = a_cluster.second;
+	  const auto &sval = binding.second;
 	  const auto &curr_region = sval->maybe_get_region ();
 
 	  if (!curr_region || curr_region->get_kind () != RK_HEAP_ALLOCATED)
