@@ -44,6 +44,7 @@
 #include "analyzer/region-model.h"
 #include "analyzer/call-details.h"
 #include "analyzer/call-info.h"
+#include "analyzer/exploded-graph.h"
 #include "make-unique.h"
 
 int plugin_is_GPL_compatible;
@@ -191,6 +192,58 @@ public:
   }
 };
 
+class refcnt_mismatch : public pending_diagnostic_subclass<refcnt_mismatch>
+{
+public:
+  refcnt_mismatch (const region *base_region,
+				const svalue *ob_refcnt,
+				const svalue *actual_refcnt)
+      : m_base_region (base_region), m_ob_refcnt (ob_refcnt),
+	m_actual_refcnt (actual_refcnt)
+  {
+  }
+
+  const char *
+  get_kind () const final override
+  {
+    return "refcnt_mismatch";
+  }
+
+  bool
+  operator== (const refcnt_mismatch &other) const
+  {
+    return (m_base_region == other.m_base_region
+	    && m_ob_refcnt == other.m_ob_refcnt
+	    && m_actual_refcnt == other.m_actual_refcnt);
+  }
+
+  int get_controlling_option () const final override
+  {
+    return 0;
+  }
+
+  bool
+  emit (rich_location *rich_loc, logger *) final override
+  {
+    diagnostic_metadata m;
+    bool warned;
+    warned = warning_meta (rich_loc, m, get_controlling_option (),
+			   "REF COUNT PROBLEM");
+    return warned;
+  }
+
+  void mark_interesting_stuff (interesting_t *interest) final override
+  {
+    if (m_base_region)
+      interest->add_region_creation (m_base_region);
+  }
+
+private:
+  const region *m_base_region;
+  const svalue *m_ob_refcnt;
+  const svalue *m_actual_refcnt;
+};
+
 /* Checks if the given region is heap allocated. */
 bool
 is_heap_allocated (const region *base_reg)
@@ -309,22 +362,23 @@ process_cluster (
     tree ob_type_field)
 {
   region_model_manager *mgr = model->get_manager ();
+  const region *base_reg = cluster.first;
 
-  // ... rest of the logic pertaining to processing an individual cluster ...
-
-  int actual_refcnt = count_actual_references (model, mgr, ctxt, cluster.first,
+  int actual_refcnt = count_actual_references (model, mgr, ctxt, base_reg,
 					       pylist_type_ptr, ob_type_field);
   inform (UNKNOWN_LOCATION, "actual ref count: %d", actual_refcnt);
 
   const svalue *ob_refcnt_sval
-      = retrieve_ob_refcnt_sval (cluster.first, model, ctxt);
+      = retrieve_ob_refcnt_sval (base_reg, model, ctxt);
   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
       ob_refcnt_sval->get_type (), actual_refcnt);
 
   if (actual_refcnt_sval != ob_refcnt_sval && ctxt)
     {
-      // ctxt->warn(make_unique<ob_refcnt_diagnostic>(base_region,
-      // ob_refcnt_sval, actual_refcnt_sval));
+      std::unique_ptr<pending_diagnostic> pd = make_unique<refcnt_mismatch> (
+	  base_reg, ob_refcnt_sval, actual_refcnt_sval);
+    if (pd)
+    inform(UNKNOWN_LOCATION, "DIAGNOSTIC ");
     }
 }
 
