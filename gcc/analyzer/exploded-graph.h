@@ -106,6 +106,7 @@ class impl_region_model_context : public region_model_context
 			 std::unique_ptr<sm_context> *out_sm_context) override;
 
   const gimple *get_stmt () const override { return m_stmt; }
+  const exploded_graph *get_eg () const override { return m_eg; }
 
   exploded_graph *m_eg;
   log_user m_logger;
