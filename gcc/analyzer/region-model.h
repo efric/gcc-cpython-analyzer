@@ -640,8 +640,14 @@ class region_model_context
  public:
   /* Hook for clients to store pending diagnostics.
      Return true if the diagnostic was stored, or false if it was deleted.  */
-   virtual bool warn (std::unique_ptr<pending_diagnostic> d)
-       = 0;
+    virtual bool warn(std::unique_ptr<pending_diagnostic> d) {
+        return warn(std::move(d), nullptr);
+    }
+    
+    virtual bool warn(std::unique_ptr<pending_diagnostic> d, const stmt_finder *custom_finder) {
+        // Default behavior, or throw an exception if this shouldn't be called directly.
+        return false;
+    }
 
    /* Hook for clients to add a note to the last previously stored
       pending diagnostic.  */

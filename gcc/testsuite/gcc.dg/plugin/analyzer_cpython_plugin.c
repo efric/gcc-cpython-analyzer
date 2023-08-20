@@ -283,9 +283,10 @@ class refcnt_mismatch : public pending_diagnostic_subclass<refcnt_mismatch>
 public:
   refcnt_mismatch (const region *base_region,
 				const svalue *ob_refcnt,
-				const svalue *actual_refcnt)
+				const svalue *actual_refcnt,
+        tree reg_tree)
       : m_base_region (base_region), m_ob_refcnt (ob_refcnt),
-	m_actual_refcnt (actual_refcnt)
+	m_actual_refcnt (actual_refcnt), m_reg_tree(reg_tree)
   {
   }
 
@@ -315,6 +316,8 @@ public:
     bool warned;
     warned = warning_meta (rich_loc, m, get_controlling_option (),
 			   "REF COUNT PROBLEM");
+    location_t loc = rich_loc->get_loc ();
+    foo (loc);
     return warned;
   }
 
@@ -324,10 +327,31 @@ public:
       interest->add_region_creation (m_base_region);
   }
 
+  // ob refcnt of 
+  // label_text describe_final_event (const evdesc::final_event &) final override
+  // {
+	// return label_text::borrow ("HALLOOOOOOO %qE");
+  // }
+
+  label_text
+  describe_final_event (const evdesc::final_event &ev) final override
+  {
+    if (m_reg_tree){
+    return ev.formatted_print ("SUP DUDE here %qE here", m_reg_tree);
+    }
+    return ev.formatted_print ("TREE NOT FOUND");
+  }
+
 private:
+
+  void foo(location_t loc) const 
+  {
+    inform(loc, "something is up right here");
+  }
   const region *m_base_region;
   const svalue *m_ob_refcnt;
   const svalue *m_actual_refcnt;
+  tree m_reg_tree;
 };
 
 /* Checks if the given region is heap allocated. */
@@ -459,24 +483,23 @@ process_cluster (
   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
       ob_refcnt_sval->get_type (), actual_refcnt);
 
-  tree reg_tree = model->get_representative_tree(base_reg);
+  const svalue *stored_sval = model->get_store_value (base_reg, ctxt);
+
+  tree reg_tree = model->get_representative_tree(stored_sval);
+  if (reg_tree)
+  {
+    inform(UNKNOWN_LOCATION, "hello there is a reg tree");
+  }
   const exploded_graph *eg = ctxt->get_eg();
   leak_stmt_finder stmt_finder (*eg, reg_tree);
-  if (const extrinsic_state *ext_state = ctxt->get_ext_state ())
-    if (const supergraph *sg = ext_state->get_engine ()->get_supergraph ())
-      {
-	const gimple *def_stmt = SSA_NAME_DEF_STMT (expr);
-	const supernode *snode = sg->get_supernode_for_stmt (def_stmt);
-	gcc_assert (snode->get_function () == m_fun);
-      }
 
-  // if (actual_refcnt_sval != ob_refcnt_sval && ctxt)
-    // {
+  if (actual_refcnt_sval != ob_refcnt_sval && ctxt)
+    {
   std::unique_ptr<pending_diagnostic> pd = make_unique<refcnt_mismatch> (
-      base_reg, ob_refcnt_sval, actual_refcnt_sval);
+      base_reg, ob_refcnt_sval, actual_refcnt_sval, reg_tree);
   if (pd && eg)
-    eg->get_diagnostic_manager().add_diagnostic();
-  // }
+    ctxt->warn(std::move(pd), &stmt_finder);
+  }
 }
 
 /* Validates the reference count of Python objects. */
