@@ -317,7 +317,7 @@ public:
     warned = warning_meta (rich_loc, m, get_controlling_option (),
 			   "REF COUNT PROBLEM");
     location_t loc = rich_loc->get_loc ();
-    foo (loc);
+    // foo (loc);
     return warned;
   }
 
@@ -333,14 +333,14 @@ public:
 	// return label_text::borrow ("HALLOOOOOOO %qE");
   // }
 
-  label_text
-  describe_final_event (const evdesc::final_event &ev) final override
-  {
-    if (m_reg_tree){
-    return ev.formatted_print ("SUP DUDE here %qE here", m_reg_tree);
-    }
-    return ev.formatted_print ("TREE NOT FOUND");
-  }
+  // label_text
+  // describe_final_event (const evdesc::final_event &ev) final override
+  // {
+  //   if (m_reg_tree){
+  //   return ev.formatted_print ("SUP DUDE here %qE here", m_reg_tree);
+  //   }
+  //   return ev.formatted_print ("TREE NOT FOUND");
+  // }
 
 private:
 
