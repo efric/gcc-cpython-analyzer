@@ -366,7 +366,6 @@ retrieve_ob_refcnt_sval (const region *base_reg, const region_model *model,
       = mgr->get_field_region (base_reg, ob_refcnt_tree);
   const svalue *ob_refcnt_sval
       = model->get_store_value (ob_refcnt_region, ctxt);
-  ob_refcnt_sval->dump (true);
   return ob_refcnt_sval;
 }
 
@@ -410,6 +409,13 @@ retrieve_ob_refcnt_sval (const region *base_reg, const region_model *model,
 //   }
 // }
 
+void
+increment_region_refcnt (hash_map<const region *, int> &map, const region *key)
+{
+  bool existed;
+  auto &refcnt = map.get_or_insert (key, &existed);
+  refcnt = existed ? refcnt + 1 : 1;
+}
 
 /* Counts the actual references from all clusters in the model's store. */
 void
@@ -417,24 +423,16 @@ count_actual_references (const region_model *model,
 			 hash_map<const region *, int>& region_to_refcnt)
 {
   for (const auto &cluster : *model->get_store ())
-  {
-  auto curr_region = cluster.first;
-  if (curr_region->get_kind () != RK_HEAP_ALLOCATED)
-    continue;
-
-  bool check;
-  auto &init_refcnt = region_to_refcnt.get_or_insert (curr_region, &check);
-  // 
-  if (!check)
-    init_refcnt = 1;
-  // if curr_region is an item somewhere (e.g an element of PyList)
-  // and we have already seen it, then we should increment it
-  else
-    init_refcnt++;
-
-  auto binding_cluster = cluster.second;
-  for (const auto &binding : binding_cluster->get_map ())
     {
+      auto curr_region = cluster.first;
+      if (curr_region->get_kind () != RK_HEAP_ALLOCATED)
+	continue;
+
+      increment_region_refcnt (region_to_refcnt, curr_region);
+
+      auto binding_cluster = cluster.second;
+      for (const auto &binding : binding_cluster->get_map ())
+	{
 	  const svalue *binding_sval = binding.second;
 
 	  const svalue *unwrapped_sval
@@ -446,15 +444,9 @@ count_actual_references (const region_model *model,
 	  if (!pointee || pointee->get_kind () != RK_HEAP_ALLOCATED)
 	    continue;
 
-    bool existed;
-	  auto &region_refcnt = region_to_refcnt.get_or_insert (pointee, &existed);
-    // it's possible that a region hasn't been seen yet. if it is the case tat this is ob_item, then we need to it to increment to 2 rather than set to 1? IDK?
-    if (!existed)
-      region_refcnt = 1;
-    else
-      region_refcnt++;
+	  increment_region_refcnt (region_to_refcnt, pointee);
+	}
     }
-  }
 }
 
 /* Validates the reference count of Python objects. */
@@ -469,13 +461,20 @@ check_pyobj_refcnt (const region_model *model, const svalue *retval,
   for (const auto &region_refcnt : region_to_refcnt)
   {
     auto region = region_refcnt.first;
-    auto refcnt = region_refcnt.second;
+    auto actual_refcnt = region_refcnt.second;
+    const svalue *ob_refcnt_sval = retrieve_ob_refcnt_sval(region, model, ctxt);
 
-    region->dump(true);
-    inform(UNKNOWN_LOCATION, "refcnt: %d", refcnt);
+    // only support constant for now
+    if (auto casted_ob_refcnt = ob_refcnt_sval->dyn_cast_constant_svalue())
+    {
+	  const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
+	      ob_refcnt_sval->get_type (), actual_refcnt);
+	  region->dump (false);
+    inform(UNKNOWN_LOCATION, "ob_refcnt: %qE", casted_ob_refcnt->get_constant());
+    inform (UNKNOWN_LOCATION, "actual refcnt: %qE",
+	    actual_refcnt_sval->dyn_cast_constant_svalue ()->get_constant ());
+    }
   }
-  inform(UNKNOWN_LOCATION, "~~~~~~~~~~~~~~~~~~~~~~~");
-//  inform(UNKNOWN_LOCATION, "___________");
 }
 
 
