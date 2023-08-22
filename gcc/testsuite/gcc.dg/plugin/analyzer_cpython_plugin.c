@@ -354,98 +354,6 @@ private:
   tree m_reg_tree;
 };
 
-/* Checks if the given region is heap allocated. */
-bool
-is_heap_allocated (const region *base_reg)
-{
-  return base_reg->get_kind () == RK_HEAP_ALLOCATED;
-}
-
-/* Increments the actual reference count if the current region matches the base
- * region. */
-void
-increment_count_if_base_matches (const region *curr_region,
-				  const region *base_reg, int &actual_refcnt)
-{
-  if (curr_region->get_base_region () == base_reg)
-    actual_refcnt++;
-}
-
-/* For PyListObjects: processes the ob_item field within the current region and
- * increments the reference count if conditions are met. */
-void
-process_ob_item_region (const region_model *model, region_model_manager *mgr,
-			region_model_context *ctxt, const region *curr_region,
-			const svalue *pylist_type_ptr, const region *base_reg,
-			int &actual_refcnt)
-{
-  tree ob_item_field_tree = get_field_by_name (pylistobj_record, "ob_item");
-  const region *ob_item_field_reg
-      = mgr->get_field_region (curr_region, ob_item_field_tree);
-  const svalue *ob_item_ptr = model->get_store_value (ob_item_field_reg, ctxt);
-
-  if (const auto &cast_ob_item_reg = ob_item_ptr->dyn_cast_region_svalue ())
-    {
-      const region *ob_item_reg = cast_ob_item_reg->get_pointee ();
-      const svalue *allocated_bytes = model->get_dynamic_extents (ob_item_reg);
-      const region *ob_item_sized = mgr->get_sized_region (
-	  ob_item_reg, pyobj_ptr_ptr, allocated_bytes);
-      const svalue *buffer_contents_sval
-	  = model->get_store_value (ob_item_sized, ctxt);
-
-      if (const auto &buffer_contents
-	  = buffer_contents_sval->dyn_cast_compound_svalue ())
-	{
-	  for (const auto &buffer_content : buffer_contents->get_map ())
-	    {
-		    const auto &content_value = buffer_content.second;
-		    if (const auto &content_region
-			= content_value->dyn_cast_region_svalue ())
-			    if (content_region->get_pointee () == base_reg)
-				    actual_refcnt++;
-	    }
-	}
-    }
-}
-
-/* Counts the actual references from all clusters in the model's store. */
-int
-count_actual_references (const region_model *model, region_model_manager *mgr,
-			 region_model_context *ctxt, const region *base_reg,
-			 const svalue *pylist_type_ptr, tree ob_type_field)
-{
-  int actual_refcnt = 0;
-  for (const auto &other_cluster : *model->get_store ())
-    {
-      for (const auto &binding : other_cluster.second->get_map ())
-	{
-	  const auto &sval = binding.second;
-	  const auto &curr_region = sval->maybe_get_region ();
-
-	  if (!curr_region)
-	    continue;
-
-	  increment_count_if_base_matches (curr_region, base_reg,
-					    actual_refcnt);
-
-	  const region *ob_type_region
-	      = mgr->get_field_region (curr_region, ob_type_field);
-	  const svalue *stored_sval
-	      = model->get_store_value (ob_type_region, ctxt);
-	  const auto &remove_cast = stored_sval->dyn_cast_unaryop_svalue ();
-
-	  if (!remove_cast)
-	    continue;
-
-	  const svalue *type = remove_cast->get_arg ();
-	  if (type == pylist_type_ptr)
-	    process_ob_item_region (model, mgr, ctxt, curr_region,
-				    pylist_type_ptr, base_reg, actual_refcnt);
-	}
-    }
-  return actual_refcnt;
-}
-
 /* Retrieves the svalue associated with the ob_refcnt field of the base region.
  */
 const svalue *
@@ -463,42 +371,89 @@ retrieve_ob_refcnt_sval (const region *base_reg, const region_model *model,
 }
 
 /* Processes an individual cluster and computes the reference count. */
+// void
+// process_cluster (
+//     const hash_map<const ana::region *,
+// 		   ana::binding_cluster *>::iterator::reference_pair cluster,
+//     const region_model *model, const svalue *retval,
+//     region_model_context *ctxt, const svalue *pylist_type_ptr,
+//     tree ob_type_field)
+// {
+//   region_model_manager *mgr = model->get_manager ();
+//   const region *base_reg = cluster.first;
+
+//   int actual_refcnt = count_actual_references (model, mgr, ctxt, base_reg,
+// 					       pylist_type_ptr, ob_type_field);
+//   inform (UNKNOWN_LOCATION, "actual ref count: %d", actual_refcnt);
+
+//   const svalue *ob_refcnt_sval
+//       = retrieve_ob_refcnt_sval (base_reg, model, ctxt);
+//   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
+//       ob_refcnt_sval->get_type (), actual_refcnt);
+
+//   const svalue *stored_sval = model->get_store_value (base_reg, ctxt);
+
+//   tree reg_tree = model->get_representative_tree(stored_sval);
+//   if (reg_tree)
+//   {
+//     inform(UNKNOWN_LOCATION, "hello there is a reg tree");
+//   }
+//   const exploded_graph *eg = ctxt->get_eg();
+//   leak_stmt_finder stmt_finder (*eg, reg_tree);
+
+//   if (actual_refcnt_sval != ob_refcnt_sval && ctxt)
+//     {
+//   std::unique_ptr<pending_diagnostic> pd = make_unique<refcnt_mismatch> (
+//       base_reg, ob_refcnt_sval, actual_refcnt_sval, reg_tree);
+//   if (pd && eg)
+//     ctxt->warn(std::move(pd), &stmt_finder);
+//   }
+// }
+
+
+/* Counts the actual references from all clusters in the model's store. */
 void
-process_cluster (
-    const hash_map<const ana::region *,
-		   ana::binding_cluster *>::iterator::reference_pair cluster,
-    const region_model *model, const svalue *retval,
-    region_model_context *ctxt, const svalue *pylist_type_ptr,
-    tree ob_type_field)
+count_actual_references (const region_model *model,
+			 hash_map<const region *, int>& region_to_refcnt)
 {
-  region_model_manager *mgr = model->get_manager ();
-  const region *base_reg = cluster.first;
-
-  int actual_refcnt = count_actual_references (model, mgr, ctxt, base_reg,
-					       pylist_type_ptr, ob_type_field);
-  inform (UNKNOWN_LOCATION, "actual ref count: %d", actual_refcnt);
-
-  const svalue *ob_refcnt_sval
-      = retrieve_ob_refcnt_sval (base_reg, model, ctxt);
-  const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
-      ob_refcnt_sval->get_type (), actual_refcnt);
-
-  const svalue *stored_sval = model->get_store_value (base_reg, ctxt);
-
-  tree reg_tree = model->get_representative_tree(stored_sval);
-  if (reg_tree)
+  for (const auto &cluster : *model->get_store ())
   {
-    inform(UNKNOWN_LOCATION, "hello there is a reg tree");
-  }
-  const exploded_graph *eg = ctxt->get_eg();
-  leak_stmt_finder stmt_finder (*eg, reg_tree);
+  auto curr_region = cluster.first;
+  if (curr_region->get_kind () != RK_HEAP_ALLOCATED)
+    continue;
 
-  if (actual_refcnt_sval != ob_refcnt_sval && ctxt)
+  bool check;
+  auto &init_refcnt = region_to_refcnt.get_or_insert (curr_region, &check);
+  // 
+  if (!check)
+    init_refcnt = 1;
+  // if curr_region is an item somewhere (e.g an element of PyList)
+  // and we have already seen it, then we should increment it
+  else
+    init_refcnt++;
+
+  auto binding_cluster = cluster.second;
+  for (const auto &binding : binding_cluster->get_map ())
     {
-  std::unique_ptr<pending_diagnostic> pd = make_unique<refcnt_mismatch> (
-      base_reg, ob_refcnt_sval, actual_refcnt_sval, reg_tree);
-  if (pd && eg)
-    ctxt->warn(std::move(pd), &stmt_finder);
+	  const svalue *binding_sval = binding.second;
+
+	  const svalue *unwrapped_sval
+	      = binding_sval->unwrap_any_unmergeable ();
+	  if (unwrapped_sval->get_type () != pyobj_ptr_tree)
+	    continue;
+
+	  const region *pointee = unwrapped_sval->maybe_get_region ();
+	  if (!pointee || pointee->get_kind () != RK_HEAP_ALLOCATED)
+	    continue;
+
+    bool existed;
+	  auto &region_refcnt = region_to_refcnt.get_or_insert (pointee, &existed);
+    // it's possible that a region hasn't been seen yet. if it is the case tat this is ob_item, then we need to it to increment to 2 rather than set to 1? IDK?
+    if (!existed)
+      region_refcnt = 1;
+    else
+      region_refcnt++;
+    }
   }
 }
 
@@ -508,34 +463,19 @@ check_pyobj_refcnt (const region_model *model, const svalue *retval,
 		    region_model_context *ctxt)
 {
   region_model_manager *mgr = model->get_manager ();
+  auto region_to_refcnt = hash_map<const region *, int> ();
+  count_actual_references (model, region_to_refcnt);
 
-  const region *pylist_type_region
-      = mgr->get_region_for_global (pylisttype_vardecl);
-  const svalue *pylist_type_ptr = mgr->get_ptr_svalue (
-      TREE_TYPE (pylisttype_vardecl), pylist_type_region);
+  for (const auto &region_refcnt : region_to_refcnt)
+  {
+    auto region = region_refcnt.first;
+    auto refcnt = region_refcnt.second;
 
-  tree ob_type_field = get_field_by_name (pyobj_record, "ob_type");
-
-  for (const auto &cluster : *model->get_store ())
-    {
-      if (!is_heap_allocated (cluster.first))
-	continue;
-
-      inform (UNKNOWN_LOCATION, "_________________");
-      const region *base_reg = cluster.first;
-      base_reg->dump (true);
-      if (const auto &retval_region_sval = retval->dyn_cast_region_svalue ())
-	{
-	  const auto &retval_reg = retval_region_sval->get_pointee ();
-	  if (retval_reg == base_reg)
-	    {
-		    inform (UNKNOWN_LOCATION, "same thiong");
-		    continue;
-	    }
-	}
-      process_cluster (cluster, model, retval, ctxt, pylist_type_ptr,
-		       ob_type_field);
-    }
+    region->dump(true);
+    inform(UNKNOWN_LOCATION, "refcnt: %d", refcnt);
+  }
+  inform(UNKNOWN_LOCATION, "~~~~~~~~~~~~~~~~~~~~~~~");
+//  inform(UNKNOWN_LOCATION, "___________");
 }
 
 
