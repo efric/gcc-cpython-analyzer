@@ -314,9 +314,17 @@ public:
   {
     diagnostic_metadata m;
     bool warned;
-    warned = warning_meta (rich_loc, m, get_controlling_option (),
-			   "REF COUNT PROBLEM");
-    location_t loc = rich_loc->get_loc ();
+    // just assuming constants for now
+    auto actual_refcnt
+	= m_actual_refcnt->dyn_cast_constant_svalue ()->get_constant ();
+    auto ob_refcnt = m_ob_refcnt->dyn_cast_constant_svalue ()->get_constant ();
+    warned = warning_meta (
+	rich_loc, m, get_controlling_option (),
+	"Expected <variable name belonging to m_base_region> to have "
+	"reference count: %qE but ob_refcnt field is: %qE",
+	actual_refcnt, ob_refcnt);
+
+    // location_t loc = rich_loc->get_loc ();
     // foo (loc);
     return warned;
   }
@@ -326,21 +334,6 @@ public:
     if (m_base_region)
       interest->add_region_creation (m_base_region);
   }
-
-  // ob refcnt of 
-  // label_text describe_final_event (const evdesc::final_event &) final override
-  // {
-	// return label_text::borrow ("HALLOOOOOOO %qE");
-  // }
-
-  // label_text
-  // describe_final_event (const evdesc::final_event &ev) final override
-  // {
-  //   if (m_reg_tree){
-  //   return ev.formatted_print ("SUP DUDE here %qE here", m_reg_tree);
-  //   }
-  //   return ev.formatted_print ("TREE NOT FOUND");
-  // }
 
 private:
 
@@ -369,46 +362,6 @@ retrieve_ob_refcnt_sval (const region *base_reg, const region_model *model,
   return ob_refcnt_sval;
 }
 
-/* Processes an individual cluster and computes the reference count. */
-// void
-// process_cluster (
-//     const hash_map<const ana::region *,
-// 		   ana::binding_cluster *>::iterator::reference_pair cluster,
-//     const region_model *model, const svalue *retval,
-//     region_model_context *ctxt, const svalue *pylist_type_ptr,
-//     tree ob_type_field)
-// {
-//   region_model_manager *mgr = model->get_manager ();
-//   const region *base_reg = cluster.first;
-
-//   int actual_refcnt = count_actual_references (model, mgr, ctxt, base_reg,
-// 					       pylist_type_ptr, ob_type_field);
-//   inform (UNKNOWN_LOCATION, "actual ref count: %d", actual_refcnt);
-
-//   const svalue *ob_refcnt_sval
-//       = retrieve_ob_refcnt_sval (base_reg, model, ctxt);
-//   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
-//       ob_refcnt_sval->get_type (), actual_refcnt);
-
-//   const svalue *stored_sval = model->get_store_value (base_reg, ctxt);
-
-//   tree reg_tree = model->get_representative_tree(stored_sval);
-//   if (reg_tree)
-//   {
-//     inform(UNKNOWN_LOCATION, "hello there is a reg tree");
-//   }
-//   const exploded_graph *eg = ctxt->get_eg();
-//   leak_stmt_finder stmt_finder (*eg, reg_tree);
-
-//   if (actual_refcnt_sval != ob_refcnt_sval && ctxt)
-//     {
-//   std::unique_ptr<pending_diagnostic> pd = make_unique<refcnt_mismatch> (
-//       base_reg, ob_refcnt_sval, actual_refcnt_sval, reg_tree);
-//   if (pd && eg)
-//     ctxt->warn(std::move(pd), &stmt_finder);
-//   }
-// }
-
 void
 increment_region_refcnt (hash_map<const region *, int> &map, const region *key)
 {
@@ -417,10 +370,65 @@ increment_region_refcnt (hash_map<const region *, int> &map, const region *key)
   refcnt = existed ? refcnt + 1 : 1;
 }
 
-/* Counts the actual references from all clusters in the model's store. */
+
+/* Recursively fills in region_to_refcnt with the references owned by
+   pyobj_ptr_sval.  */
 void
-count_actual_references (const region_model *model,
-			 hash_map<const region *, int>& region_to_refcnt)
+count_expected_pyobj_references (const region_model *model,
+			   hash_map<const region *, int> &region_to_refcnt,
+			   const svalue *pyobj_ptr_sval,
+			   hash_set<const region *> &seen)
+{
+  if (!pyobj_ptr_sval)
+    return;
+
+  const auto *pyobj_region_sval = pyobj_ptr_sval->dyn_cast_region_svalue ();
+  const auto *pyobj_initial_sval = pyobj_ptr_sval->dyn_cast_initial_svalue ();
+  if (!pyobj_region_sval && !pyobj_initial_sval)
+    return;
+
+  // todo: support initial sval (e.g passed in as parameter)
+  // if (pyobj_initial_sval)
+  //   {
+  //     increment_region_refcnt (region_to_refcnt,
+	// 		       pyobj_initial_sval->get_region ());
+  //     return;
+  //   }
+
+  const region *pyobj_region = pyobj_region_sval->get_pointee ();
+  if (!pyobj_region || seen.contains (pyobj_region))
+    return;
+
+  seen.add (pyobj_region);
+
+  if (pyobj_ptr_sval->get_type () == pyobj_ptr_tree)
+    increment_region_refcnt (region_to_refcnt, pyobj_region);
+
+  const auto *curr_store = model->get_store ();
+  const auto *retval_cluster = curr_store->get_cluster (pyobj_region);
+  if (!retval_cluster)
+    return;
+
+  const auto &retval_binding_map = retval_cluster->get_map ();
+
+  for (const auto &binding : retval_binding_map)
+    {
+      const svalue *binding_sval = binding.second;
+      const svalue *unwrapped_sval = binding_sval->unwrap_any_unmergeable ();
+      const region *pointee = unwrapped_sval->maybe_get_region ();
+
+      if (pointee && pointee->get_kind () == RK_HEAP_ALLOCATED)
+	count_expected_pyobj_references (model, region_to_refcnt, binding_sval,
+					 seen);
+    }
+}
+
+/* Counts the actual pyobject references from all clusters in the model's
+ * store. */
+void
+count_all_references (const region_model *model,
+			 hash_map<const region *, int>& region_to_refcnt,
+       const svalue *retval = NULL)
 {
   for (const auto &cluster : *model->get_store ())
     {
@@ -437,8 +445,8 @@ count_actual_references (const region_model *model,
 
 	  const svalue *unwrapped_sval
 	      = binding_sval->unwrap_any_unmergeable ();
-	  if (unwrapped_sval->get_type () != pyobj_ptr_tree)
-	    continue;
+	  // if (unwrapped_sval->get_type () != pyobj_ptr_tree)
+	    // continue;
 
 	  const region *pointee = unwrapped_sval->maybe_get_region ();
 	  if (!pointee || pointee->get_kind () != RK_HEAP_ALLOCATED)
@@ -449,32 +457,90 @@ count_actual_references (const region_model *model,
     }
 }
 
-/* Validates the reference count of Python objects. */
 void
-check_pyobj_refcnt (const region_model *model, const svalue *retval,
-		    region_model_context *ctxt)
+dump_references (const hash_map<const region *, int> &region_to_refcnt,
+		 const region_model *model, region_model_context *ctxt)
 {
   region_model_manager *mgr = model->get_manager ();
-  auto region_to_refcnt = hash_map<const region *, int> ();
-  count_actual_references (model, region_to_refcnt);
-
   for (const auto &region_refcnt : region_to_refcnt)
   {
     auto region = region_refcnt.first;
     auto actual_refcnt = region_refcnt.second;
     const svalue *ob_refcnt_sval = retrieve_ob_refcnt_sval(region, model, ctxt);
+	  const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
+	      ob_refcnt_sval->get_type (), actual_refcnt);
+	  region->dump (false);
+    ob_refcnt_sval->dump(false);
+    actual_refcnt_sval->dump(false);
 
-    // only support constant for now
+
+    // just constant for now
     if (auto casted_ob_refcnt = ob_refcnt_sval->dyn_cast_constant_svalue())
     {
 	  const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
 	      ob_refcnt_sval->get_type (), actual_refcnt);
-	  region->dump (false);
-    inform(UNKNOWN_LOCATION, "ob_refcnt: %qE", casted_ob_refcnt->get_constant());
-    inform (UNKNOWN_LOCATION, "actual refcnt: %qE",
-	    actual_refcnt_sval->dyn_cast_constant_svalue ()->get_constant ());
+	  // region->dump (false);
+    // inform(UNKNOWN_LOCATION, "ob_refcnt: %qE", casted_ob_refcnt->get_constant());
+    // inform (UNKNOWN_LOCATION, "actual refcnt: %qE",
+	    // actual_refcnt_sval->dyn_cast_constant_svalue ()->get_constant ());
     }
   }
+  inform(UNKNOWN_LOCATION, "~~~~~~~~~~~");
+}
+
+/* Compare ob_refcnt field vs the actual reference count of a region */
+void
+check_refcnt (const region_model *model, region_model_context *ctxt,
+	      const hash_map<const ana::region *,
+			     int>::iterator::reference_pair region_refcnt)
+{
+  region_model_manager *mgr = model->get_manager ();
+  auto region = region_refcnt.first;
+  auto actual_refcnt = region_refcnt.second;
+  const svalue *ob_refcnt_sval = retrieve_ob_refcnt_sval (region, model, ctxt);
+  const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
+      ob_refcnt_sval->get_type (), actual_refcnt);
+
+  if (ob_refcnt_sval != actual_refcnt_sval)
+  {
+    // todo: fix this
+    tree reg_tree = model->get_representative_tree (region);
+
+    if (!ctxt)
+    return;
+
+    auto eg = ctxt->get_eg ();
+    leak_stmt_finder finder (*eg, reg_tree);
+    auto pd = make_unique<refcnt_mismatch> (region, ob_refcnt_sval,
+					    actual_refcnt_sval, reg_tree);
+    if (pd && eg)
+    ctxt->warn (std::move (pd), &finder);
+  }
+}
+
+void
+check_refcnts (const region_model *model, const svalue *retval,
+	    region_model_context *ctxt,
+	    hash_map<const region *, int> &region_to_refcnt)
+{
+  for (const auto &region_refcnt : region_to_refcnt)
+  {
+    check_refcnt(model, ctxt, region_refcnt);
+  }
+}
+
+/* Validates the reference count of all Python objects. */
+void
+pyobj_refcnt_checker (const region_model *model, const svalue *retval,
+		    region_model_context *ctxt)
+{
+  auto region_to_refcnt = hash_map<const region *, int> ();
+  auto seen_regions = hash_set<const region *> ();
+
+  count_expected_pyobj_references (model, region_to_refcnt, retval, seen_regions);
+  check_refcnts (model, retval, ctxt, region_to_refcnt);
+
+  // dump_references (region_to_refcnt, model, ctxt);
 }
 
 
@@ -1230,7 +1296,7 @@ plugin_init (struct plugin_name_args *plugin_info,
     inform (input_location, "got here; %qs", plugin_name);
   register_finish_translation_unit_callback (&stash_named_types);
   register_finish_translation_unit_callback (&stash_global_vars);
-  region_model::register_pop_frame_callback(check_pyobj_refcnt);
+  region_model::register_pop_frame_callback(pyobj_refcnt_checker);
   register_callback (plugin_info->base_name, PLUGIN_ANALYZER_INIT,
                      ana::cpython_analyzer_init_cb,
                      NULL); /* void *user_data */
