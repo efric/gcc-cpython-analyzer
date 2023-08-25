@@ -192,13 +192,13 @@ public:
   }
 };
 
-/* Subclass of stmt_finder for finding the best stmt to report the leak at,
-   given the emission path.  */
+/* This is just a copy of leak_stmt_finder for now (subject to change if
+ * necssary)  */
 
-class leak_stmt_finder : public stmt_finder
+class refcnt_stmt_finder : public stmt_finder
 {
 public:
-  leak_stmt_finder (const exploded_graph &eg, tree var)
+  refcnt_stmt_finder (const exploded_graph &eg, tree var)
       : m_eg (eg), m_var (var)
   {
   }
@@ -206,7 +206,7 @@ public:
   std::unique_ptr<stmt_finder>
   clone () const final override
   {
-    return make_unique<leak_stmt_finder> (m_eg, m_var);
+    return make_unique<refcnt_stmt_finder> (m_eg, m_var);
   }
 
   const gimple *
@@ -388,12 +388,12 @@ count_expected_pyobj_references (const region_model *model,
     return;
 
   // todo: support initial sval (e.g passed in as parameter)
-  // if (pyobj_initial_sval)
-  //   {
+  if (pyobj_initial_sval)
+    {
   //     increment_region_refcnt (region_to_refcnt,
 	// 		       pyobj_initial_sval->get_region ());
-  //     return;
-  //   }
+      return;
+    }
 
   const region *pyobj_region = pyobj_region_sval->get_pointee ();
   if (!pyobj_region || seen.contains (pyobj_region))
@@ -423,71 +423,6 @@ count_expected_pyobj_references (const region_model *model,
     }
 }
 
-/* Counts the actual pyobject references from all clusters in the model's
- * store. */
-void
-count_all_references (const region_model *model,
-			 hash_map<const region *, int>& region_to_refcnt,
-       const svalue *retval = NULL)
-{
-  for (const auto &cluster : *model->get_store ())
-    {
-      auto curr_region = cluster.first;
-      if (curr_region->get_kind () != RK_HEAP_ALLOCATED)
-	continue;
-
-      increment_region_refcnt (region_to_refcnt, curr_region);
-
-      auto binding_cluster = cluster.second;
-      for (const auto &binding : binding_cluster->get_map ())
-	{
-	  const svalue *binding_sval = binding.second;
-
-	  const svalue *unwrapped_sval
-	      = binding_sval->unwrap_any_unmergeable ();
-	  // if (unwrapped_sval->get_type () != pyobj_ptr_tree)
-	    // continue;
-
-	  const region *pointee = unwrapped_sval->maybe_get_region ();
-	  if (!pointee || pointee->get_kind () != RK_HEAP_ALLOCATED)
-	    continue;
-
-	  increment_region_refcnt (region_to_refcnt, pointee);
-	}
-    }
-}
-
-void
-dump_references (const hash_map<const region *, int> &region_to_refcnt,
-		 const region_model *model, region_model_context *ctxt)
-{
-  region_model_manager *mgr = model->get_manager ();
-  for (const auto &region_refcnt : region_to_refcnt)
-  {
-    auto region = region_refcnt.first;
-    auto actual_refcnt = region_refcnt.second;
-    const svalue *ob_refcnt_sval = retrieve_ob_refcnt_sval(region, model, ctxt);
-	  const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
-	      ob_refcnt_sval->get_type (), actual_refcnt);
-	  region->dump (false);
-    ob_refcnt_sval->dump(false);
-    actual_refcnt_sval->dump(false);
-
-
-    // just constant for now
-    if (auto casted_ob_refcnt = ob_refcnt_sval->dyn_cast_constant_svalue())
-    {
-	  const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
-	      ob_refcnt_sval->get_type (), actual_refcnt);
-	  // region->dump (false);
-    // inform(UNKNOWN_LOCATION, "ob_refcnt: %qE", casted_ob_refcnt->get_constant());
-    // inform (UNKNOWN_LOCATION, "actual refcnt: %qE",
-	    // actual_refcnt_sval->dyn_cast_constant_svalue ()->get_constant ());
-    }
-  }
-  inform(UNKNOWN_LOCATION, "~~~~~~~~~~~");
-}
-
 /* Compare ob_refcnt field vs the actual reference count of a region */
 void
 check_refcnt (const region_model *model, region_model_context *ctxt,
@@ -495,8 +430,8 @@ check_refcnt (const region_model *model, region_model_context *ctxt,
 			     int>::iterator::reference_pair region_refcnt)
 {
   region_model_manager *mgr = model->get_manager ();
-  auto region = region_refcnt.first;
-  auto actual_refcnt = region_refcnt.second;
+  const auto &region = region_refcnt.first;
+  const auto &actual_refcnt = region_refcnt.second;
   const svalue *ob_refcnt_sval = retrieve_ob_refcnt_sval (region, model, ctxt);
   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
       ob_refcnt_sval->get_type (), actual_refcnt);
@@ -506,11 +441,8 @@ check_refcnt (const region_model *model, region_model_context *ctxt,
     // todo: fix this
     tree reg_tree = model->get_representative_tree (region);
 
-    if (!ctxt)
-    return;
-
-    auto eg = ctxt->get_eg ();
-    leak_stmt_finder finder (*eg, reg_tree);
+    const auto &eg = ctxt->get_eg ();
+    refcnt_stmt_finder finder (*eg, reg_tree);
     auto pd = make_unique<refcnt_mismatch> (region, ob_refcnt_sval,
 					    actual_refcnt_sval, reg_tree);
     if (pd && eg)
@@ -534,16 +466,97 @@ void
 pyobj_refcnt_checker (const region_model *model, const svalue *retval,
 		    region_model_context *ctxt)
 {
+  if (!ctxt)
+  return;
+
   auto region_to_refcnt = hash_map<const region *, int> ();
   auto seen_regions = hash_set<const region *> ();
 
   count_expected_pyobj_references (model, region_to_refcnt, retval, seen_regions);
   check_refcnts (model, retval, ctxt, region_to_refcnt);
-
-  // dump_references (region_to_refcnt, model, ctxt);
 }
 
+/* Counts the actual pyobject references from all clusters in the model's
+ * store. */
+void
+count_all_references (const region_model *model,
+		      hash_map<const region *, int> &region_to_refcnt)
+{
+  for (const auto &cluster : *model->get_store ())
+  {
+    auto curr_region = cluster.first;
+    if (curr_region->get_kind () != RK_HEAP_ALLOCATED)
+    continue;
 
+    increment_region_refcnt (region_to_refcnt, curr_region);
+
+    auto binding_cluster = cluster.second;
+    for (const auto &binding : binding_cluster->get_map ())
+    {
+	  const svalue *binding_sval = binding.second;
+
+	  const svalue *unwrapped_sval
+	      = binding_sval->unwrap_any_unmergeable ();
+	  // if (unwrapped_sval->get_type () != pyobj_ptr_tree)
+	  // continue;
+
+	  const region *pointee = unwrapped_sval->maybe_get_region ();
+	  if (!pointee || pointee->get_kind () != RK_HEAP_ALLOCATED)
+	    continue;
+
+	  increment_region_refcnt (region_to_refcnt, pointee);
+    }
+  }
+}
+
+void
+dump_refcnt_info (const hash_map<const region *, int> &region_to_refcnt,
+		  const region_model *model, region_model_context *ctxt)
+{
+  region_model_manager *mgr = model->get_manager ();
+  pretty_printer pp;
+  pp_format_decoder (&pp) = default_tree_printer;
+  pp_show_color (&pp) = pp_show_color (global_dc->printer);
+  pp.buffer->stream = stderr;
+
+  for (const auto &region_refcnt : region_to_refcnt)
+  {
+    auto region = region_refcnt.first;
+    auto actual_refcnt = region_refcnt.second;
+    const svalue *ob_refcnt_sval
+	= retrieve_ob_refcnt_sval (region, model, ctxt);
+    const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
+	ob_refcnt_sval->get_type (), actual_refcnt);
+
+    region->dump_to_pp (&pp, true);
+    pp_string (&pp, " — ob_refcnt: ");
+    ob_refcnt_sval->dump_to_pp (&pp, true);
+    pp_string (&pp, " actual refcnt: ");
+    actual_refcnt_sval->dump_to_pp (&pp, true);
+    pp_newline (&pp);
+  }
+  pp_string (&pp, "~~~~~~~~\n");
+  pp_flush (&pp);
+}
+
+class kf_analyzer_cpython_dump_refcounts : public known_function
+{
+public:
+  bool matches_call_types_p (const call_details &cd) const final override
+  {
+    return cd.num_args () == 0;
+  }
+  void impl_call_pre (const call_details &cd) const final override
+  {
+    region_model_context *ctxt = cd.get_ctxt ();
+    if (!ctxt)
+      return;
+    region_model *model = cd.get_model ();
+    auto region_to_refcnt = hash_map<const region *, int> ();
+    count_all_references(model, region_to_refcnt);
+    dump_refcnt_info(region_to_refcnt, model, ctxt);
+  }
+};
 
 /* Some concessions were made to
 simplify the analysis process when comparing kf_PyList_Append with the
@@ -1281,6 +1294,10 @@ cpython_analyzer_init_cb (void *gcc_data, void * /*user_data */)
   iface->register_known_function ("PyList_New", make_unique<kf_PyList_New> ());
   iface->register_known_function ("PyLong_FromLong",
                                   make_unique<kf_PyLong_FromLong> ());
+
+  iface->register_known_function (
+      "__analyzer_cpython_dump_refcounts",
+      make_unique<kf_analyzer_cpython_dump_refcounts> ());
 }
 } // namespace ana
 
