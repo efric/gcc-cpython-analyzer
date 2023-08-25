@@ -639,98 +639,97 @@ class region_model_context
 {
  public:
   /* Hook for clients to store pending diagnostics.
-     Return true if the diagnostic was stored, or false if it was deleted.  */
+     Return true if the diagnostic was stored, or false if it was deleted.
+     Optionally provide a custom stmt_finder.  */
     virtual bool warn(std::unique_ptr<pending_diagnostic> d) {
         return warn(std::move(d), nullptr);
     }
     
     virtual bool warn(std::unique_ptr<pending_diagnostic> d, const stmt_finder *custom_finder) {
-        // Default behavior, or throw an exception if this shouldn't be called directly.
         return false;
     }
 
-   /* Hook for clients to add a note to the last previously stored
-      pending diagnostic.  */
-   virtual void add_note (std::unique_ptr<pending_note> pn) = 0;
+  /* Hook for clients to add a note to the last previously stored
+     pending diagnostic.  */
+  virtual void add_note (std::unique_ptr<pending_note> pn) = 0;
 
-   /* Hook for clients to be notified when an SVAL that was reachable
-      in a previous state is no longer live, so that clients can emit warnings
-      about leaks.  */
-   virtual void on_svalue_leak (const svalue *sval) = 0;
+  /* Hook for clients to be notified when an SVAL that was reachable
+     in a previous state is no longer live, so that clients can emit warnings
+     about leaks.  */
+  virtual void on_svalue_leak (const svalue *sval) = 0;
 
-   /* Hook for clients to be notified when the set of explicitly live
-      svalues changes, so that they can purge state relating to dead
-      svalues.  */
-   virtual void on_liveness_change (const svalue_set &live_svalues,
-				    const region_model *model)
-       = 0;
+  /* Hook for clients to be notified when the set of explicitly live
+     svalues changes, so that they can purge state relating to dead
+     svalues.  */
+  virtual void on_liveness_change (const svalue_set &live_svalues,
+				   const region_model *model) = 0;
 
-   virtual logger *get_logger () = 0;
+  virtual logger *get_logger () = 0;
 
-   /* Hook for clients to be notified when the condition
-      "LHS OP RHS" is added to the region model.
-      This exists so that state machines can detect tests on edges,
-      and use them to trigger sm-state transitions (e.g. transitions due
-      to ptrs becoming known to be NULL or non-NULL, rather than just
-      "unchecked") */
-   virtual void on_condition (const svalue *lhs, enum tree_code op,
-			      const svalue *rhs)
-       = 0;
+  /* Hook for clients to be notified when the condition
+     "LHS OP RHS" is added to the region model.
+     This exists so that state machines can detect tests on edges,
+     and use them to trigger sm-state transitions (e.g. transitions due
+     to ptrs becoming known to be NULL or non-NULL, rather than just
+     "unchecked") */
+  virtual void on_condition (const svalue *lhs,
+			     enum tree_code op,
+			     const svalue *rhs) = 0;
 
-   /* Hook for clients to be notified when the condition that
-      SVAL is within RANGES is added to the region model.
-      Similar to on_condition, but for use when handling switch statements.
-      RANGES is non-empty.  */
-   virtual void on_bounded_ranges (const svalue &sval,
-				   const bounded_ranges &ranges)
-       = 0;
+  /* Hook for clients to be notified when the condition that
+     SVAL is within RANGES is added to the region model.
+     Similar to on_condition, but for use when handling switch statements.
+     RANGES is non-empty.  */
+  virtual void on_bounded_ranges (const svalue &sval,
+				  const bounded_ranges &ranges) = 0;
 
-   /* Hook for clients to be notified when a frame is popped from the stack. */
-   virtual void on_pop_frame (const frame_region *) = 0;
+  /* Hook for clients to be notified when a frame is popped from the stack.  */
+  virtual void on_pop_frame (const frame_region *) = 0;
 
-   /* Hooks for clients to be notified when an unknown change happens
-      to SVAL (in response to a call to an unknown function).  */
-   virtual void on_unknown_change (const svalue *sval, bool is_mutable) = 0;
+  /* Hooks for clients to be notified when an unknown change happens
+     to SVAL (in response to a call to an unknown function).  */
+  virtual void on_unknown_change (const svalue *sval, bool is_mutable) = 0;
 
-   /* Hooks for clients to be notified when a phi node is handled,
-      where RHS is the pertinent argument.  */
-   virtual void on_phi (const gphi *phi, tree rhs) = 0;
+  /* Hooks for clients to be notified when a phi node is handled,
+     where RHS is the pertinent argument.  */
+  virtual void on_phi (const gphi *phi, tree rhs) = 0;
 
-   /* Hooks for clients to be notified when the region model doesn't
-      know how to handle the tree code of T at LOC.  */
-   virtual void on_unexpected_tree_code (tree t, const dump_location_t &loc)
-       = 0;
+  /* Hooks for clients to be notified when the region model doesn't
+     know how to handle the tree code of T at LOC.  */
+  virtual void on_unexpected_tree_code (tree t,
+					const dump_location_t &loc) = 0;
 
-   /* Hook for clients to be notified when a function_decl escapes.  */
-   virtual void on_escaped_function (tree fndecl) = 0;
+  /* Hook for clients to be notified when a function_decl escapes.  */
+  virtual void on_escaped_function (tree fndecl) = 0;
 
-   virtual uncertainty_t *get_uncertainty () = 0;
+  virtual uncertainty_t *get_uncertainty () = 0;
 
-   /* Hook for clients to purge state involving SVAL.  */
-   virtual void purge_state_involving (const svalue *sval) = 0;
+  /* Hook for clients to purge state involving SVAL.  */
+  virtual void purge_state_involving (const svalue *sval) = 0;
 
-   /* Hook for clients to split state with a non-standard path.  */
-   virtual void bifurcate (std::unique_ptr<custom_edge_info> info) = 0;
+  /* Hook for clients to split state with a non-standard path.  */
+  virtual void bifurcate (std::unique_ptr<custom_edge_info> info) = 0;
 
-   /* Hook for clients to terminate the standard path.  */
-   virtual void terminate_path () = 0;
+  /* Hook for clients to terminate the standard path.  */
+  virtual void terminate_path () = 0;
 
-   virtual const extrinsic_state *get_ext_state () const = 0;
+  virtual const extrinsic_state *get_ext_state () const = 0;
 
-   /* Hook for clients to access the a specific state machine in
-      any underlying program_state.  */
-   virtual bool
-   get_state_map_by_name (const char *name, sm_state_map **out_smap,
-			  const state_machine **out_sm, unsigned *out_sm_idx,
-			  std::unique_ptr<sm_context> *out_sm_context)
-       = 0;
+  /* Hook for clients to access the a specific state machine in
+     any underlying program_state.  */
+  virtual bool
+  get_state_map_by_name (const char *name,
+			 sm_state_map **out_smap,
+			 const state_machine **out_sm,
+			 unsigned *out_sm_idx,
+			 std::unique_ptr<sm_context> *out_sm_context) = 0;
 
-   /* Precanned ways for clients to access specific state machines.  */
-   bool
-   get_fd_map (sm_state_map **out_smap, const state_machine **out_sm,
-	       unsigned *out_sm_idx,
-	       std::unique_ptr<sm_context> *out_sm_context)
-   {
+  /* Precanned ways for clients to access specific state machines.  */
+  bool get_fd_map (sm_state_map **out_smap,
+		   const state_machine **out_sm,
+		   unsigned *out_sm_idx,
+		   std::unique_ptr<sm_context> *out_sm_context)
+  {
     return get_state_map_by_name ("file-descriptor", out_smap, out_sm,
 				  out_sm_idx, out_sm_context);
   }
