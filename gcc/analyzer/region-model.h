@@ -641,13 +641,8 @@ class region_model_context
   /* Hook for clients to store pending diagnostics.
      Return true if the diagnostic was stored, or false if it was deleted.
      Optionally provide a custom stmt_finder.  */
-    virtual bool warn(std::unique_ptr<pending_diagnostic> d) {
-        return warn(std::move(d), nullptr);
-    }
-    
-    virtual bool warn(std::unique_ptr<pending_diagnostic> d, const stmt_finder *custom_finder) {
-        return false;
-    }
+  virtual bool warn (std::unique_ptr<pending_diagnostic> d, 
+                     const stmt_finder *custom_finder = NULL)  = 0;
 
   /* Hook for clients to add a note to the last previously stored
      pending diagnostic.  */
@@ -759,7 +754,8 @@ class region_model_context
 class noop_region_model_context : public region_model_context
 {
 public:
-  bool warn (std::unique_ptr<pending_diagnostic>) override { return false; }
+  bool warn (std::unique_ptr<pending_diagnostic>,
+			   const stmt_finder *custom_finder) override { return false; }
   void add_note (std::unique_ptr<pending_note>) override;
   void on_svalue_leak (const svalue *) override {}
   void on_liveness_change (const svalue_set &,
@@ -835,7 +831,8 @@ private:
 class region_model_context_decorator : public region_model_context
 {
  public:
-  bool warn (std::unique_ptr<pending_diagnostic> d) override
+  bool warn (std::unique_ptr<pending_diagnostic> d,
+			  const stmt_finder *custom_finder) override
   {
     return m_inner->warn (std::move (d));
   }
@@ -943,7 +940,10 @@ class region_model_context_decorator : public region_model_context
 
   const exploded_graph *get_eg () const override
   {
-    return m_inner->get_eg ();
+    if (m_inner)
+	return m_inner->get_eg ();
+    else
+	return nullptr;
   }
 
 protected:
@@ -962,7 +962,8 @@ protected:
 class note_adding_context : public region_model_context_decorator
 {
 public:
-  bool warn (std::unique_ptr<pending_diagnostic> d) override
+  bool warn (std::unique_ptr<pending_diagnostic> d,
+			  const stmt_finder *custom_finder) override
   {
     if (m_inner->warn (std::move (d)))
       {
@@ -1127,7 +1128,8 @@ using namespace ::selftest;
 class test_region_model_context : public noop_region_model_context
 {
 public:
-  bool warn (std::unique_ptr<pending_diagnostic> d) final override
+  bool warn (std::unique_ptr<pending_diagnostic> d,
+			  const stmt_finder *custom_finder) final override
   {
     m_diagnostics.safe_push (d.release ());
     return true;

@@ -320,7 +320,7 @@ public:
     auto ob_refcnt = m_ob_refcnt->dyn_cast_constant_svalue ()->get_constant ();
     warned = warning_meta (
 	rich_loc, m, get_controlling_option (),
-	"Expected <variable name belonging to m_base_region> to have "
+	"expected <variable name belonging to m_base_region> to have "
 	"reference count: %qE but ob_refcnt field is: %qE",
 	actual_refcnt, ob_refcnt);
 
@@ -349,7 +349,7 @@ private:
 
 /* Retrieves the svalue associated with the ob_refcnt field of the base region.
  */
-const svalue *
+static const svalue *
 retrieve_ob_refcnt_sval (const region *base_reg, const region_model *model,
 			 region_model_context *ctxt)
 {
@@ -362,7 +362,7 @@ retrieve_ob_refcnt_sval (const region *base_reg, const region_model *model,
   return ob_refcnt_sval;
 }
 
-void
+static void
 increment_region_refcnt (hash_map<const region *, int> &map, const region *key)
 {
   bool existed;
@@ -373,7 +373,7 @@ increment_region_refcnt (hash_map<const region *, int> &map, const region *key)
 
 /* Recursively fills in region_to_refcnt with the references owned by
    pyobj_ptr_sval.  */
-void
+static void
 count_expected_pyobj_references (const region_model *model,
 			   hash_map<const region *, int> &region_to_refcnt,
 			   const svalue *pyobj_ptr_sval,
@@ -424,7 +424,7 @@ count_expected_pyobj_references (const region_model *model,
 }
 
 /* Compare ob_refcnt field vs the actual reference count of a region */
-void
+static void
 check_refcnt (const region_model *model, region_model_context *ctxt,
 	      const hash_map<const ana::region *,
 			     int>::iterator::reference_pair region_refcnt)
@@ -450,7 +450,7 @@ check_refcnt (const region_model *model, region_model_context *ctxt,
   }
 }
 
-void
+static void
 check_refcnts (const region_model *model, const svalue *retval,
 	    region_model_context *ctxt,
 	    hash_map<const region *, int> &region_to_refcnt)
@@ -478,7 +478,7 @@ pyobj_refcnt_checker (const region_model *model, const svalue *retval,
 
 /* Counts the actual pyobject references from all clusters in the model's
  * store. */
-void
+static void
 count_all_references (const region_model *model,
 		      hash_map<const region *, int> &region_to_refcnt)
 {
@@ -509,7 +509,7 @@ count_all_references (const region_model *model,
   }
 }
 
-void
+static void
 dump_refcnt_info (const hash_map<const region *, int> &region_to_refcnt,
 		  const region_model *model, region_model_context *ctxt)
 {
