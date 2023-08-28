@@ -430,20 +430,20 @@ check_refcnt (const region_model *model, region_model_context *ctxt,
 			     int>::iterator::reference_pair region_refcnt)
 {
   region_model_manager *mgr = model->get_manager ();
-  const auto &region = region_refcnt.first;
+  const auto &curr_region = region_refcnt.first;
   const auto &actual_refcnt = region_refcnt.second;
-  const svalue *ob_refcnt_sval = retrieve_ob_refcnt_sval (region, model, ctxt);
+  const svalue *ob_refcnt_sval = retrieve_ob_refcnt_sval (curr_region, model, ctxt);
   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
       ob_refcnt_sval->get_type (), actual_refcnt);
 
   if (ob_refcnt_sval != actual_refcnt_sval)
   {
     // todo: fix this
-    tree reg_tree = model->get_representative_tree (region);
+    tree reg_tree = model->get_representative_tree (curr_region);
 
     const auto &eg = ctxt->get_eg ();
     refcnt_stmt_finder finder (*eg, reg_tree);
-    auto pd = make_unique<refcnt_mismatch> (region, ob_refcnt_sval,
+    auto pd = make_unique<refcnt_mismatch> (curr_region, ob_refcnt_sval,
 					    actual_refcnt_sval, reg_tree);
     if (pd && eg)
     ctxt->warn (std::move (pd), &finder);
