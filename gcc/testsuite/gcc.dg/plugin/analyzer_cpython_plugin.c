@@ -318,11 +318,10 @@ public:
     auto actual_refcnt
 	= m_actual_refcnt->dyn_cast_constant_svalue ()->get_constant ();
     auto ob_refcnt = m_ob_refcnt->dyn_cast_constant_svalue ()->get_constant ();
-    warned = warning_meta (
-	rich_loc, m, get_controlling_option (),
-	"expected <variable name belonging to m_base_region> to have "
-	"reference count: %qE but ob_refcnt field is: %qE",
-	actual_refcnt, ob_refcnt);
+    warned = warning_meta (rich_loc, m, get_controlling_option (),
+			   "expected %qE to have "
+			   "reference count: %qE but ob_refcnt field is: %qE",
+			   m_reg_tree, actual_refcnt, ob_refcnt);
 
     // location_t loc = rich_loc->get_loc ();
     // foo (loc);
@@ -425,7 +424,8 @@ count_expected_pyobj_references (const region_model *model,
 
 /* Compare ob_refcnt field vs the actual reference count of a region */
 static void
-check_refcnt (const region_model *model, region_model_context *ctxt,
+check_refcnt (const region_model *model, const region_model *old_model,
+	      region_model_context *ctxt,
 	      const hash_map<const ana::region *,
 			     int>::iterator::reference_pair region_refcnt)
 {
@@ -438,8 +438,11 @@ check_refcnt (const region_model *model, region_model_context *ctxt,
 
   if (ob_refcnt_sval != actual_refcnt_sval)
   {
-    // todo: fix this
-    tree reg_tree = model->get_representative_tree (curr_region);
+    const svalue *curr_reg_sval
+	= mgr->get_ptr_svalue (pyobj_ptr_tree, curr_region);
+    tree reg_tree = old_model->get_representative_tree (curr_reg_sval);
+    if (!reg_tree)
+	    return;
 
     const auto &eg = ctxt->get_eg ();
     refcnt_stmt_finder finder (*eg, reg_tree);
@@ -451,20 +454,22 @@ check_refcnt (const region_model *model, region_model_context *ctxt,
 }
 
 static void
-check_refcnts (const region_model *model, const svalue *retval,
-	    region_model_context *ctxt,
-	    hash_map<const region *, int> &region_to_refcnt)
+check_refcnts (const region_model *model, const region_model *old_model,
+	       const svalue *retval, region_model_context *ctxt,
+	       hash_map<const region *, int> &region_to_refcnt)
 {
   for (const auto &region_refcnt : region_to_refcnt)
   {
-    check_refcnt(model, ctxt, region_refcnt);
+    check_refcnt(model, old_model, ctxt, region_refcnt);
   }
 }
 
 /* Validates the reference count of all Python objects. */
 void
-pyobj_refcnt_checker (const region_model *model, const svalue *retval,
-		    region_model_context *ctxt)
+pyobj_refcnt_checker (const region_model *model,
+		      const region_model *old_model,
+          const svalue *retval,
+		      region_model_context *ctxt)
 {
   if (!ctxt)
   return;
@@ -473,7 +478,7 @@ pyobj_refcnt_checker (const region_model *model, const svalue *retval,
   auto seen_regions = hash_set<const region *> ();
 
   count_expected_pyobj_references (model, region_to_refcnt, retval, seen_regions);
-  check_refcnts (model, retval, ctxt, region_to_refcnt);
+  check_refcnts (model, old_model, retval, ctxt, region_to_refcnt);
 }
 
 /* Counts the actual pyobject references from all clusters in the model's

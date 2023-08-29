@@ -237,6 +237,7 @@ public:
 struct append_regions_cb_data;
 
 typedef void (*pop_frame_callback) (const region_model *model,
+				    const region_model *prev_model,
 				    const svalue *retval,
 				    region_model_context *ctxt);
 
@@ -543,11 +544,13 @@ class region_model
   }
 
   static void
-  notify_on_pop_frame (const region_model *model, const svalue *retval,
+  notify_on_pop_frame (const region_model *model,
+		       const region_model *prev_model,
+           const svalue *retval,
 		       region_model_context *ctxt)
   {
     for (auto &callback : pop_frame_callbacks)
-	callback (model, retval, ctxt);
+	callback (model, prev_model, retval, ctxt);
   }
 
 private:

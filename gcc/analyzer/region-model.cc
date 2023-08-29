@@ -5391,6 +5391,7 @@ region_model::pop_frame (tree result_lvalue,
 {
   gcc_assert (m_current_frame);
 
+  const region_model pre_popped_model = *this;
   const frame_region *frame_reg = m_current_frame;
 
   /* Notify state machines.  */
@@ -5424,7 +5425,7 @@ region_model::pop_frame (tree result_lvalue,
     }
 
   unbind_region_and_descendents (frame_reg,POISON_KIND_POPPED_STACK);
-  notify_on_pop_frame (this, retval, ctxt);
+  notify_on_pop_frame (this, &pre_popped_model, retval, ctxt);
 }
 
 /* Get the number of frames in this region_model's stack.  */
