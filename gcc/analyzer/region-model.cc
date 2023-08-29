@@ -82,6 +82,8 @@ along with GCC; see the file COPYING3.  If not see
 
 namespace ana {
 
+auto_vec<pop_frame_callback> region_model::pop_frame_callbacks;
+
 /* Dump T to PP in language-independent form, for debugging/logging/dumping
    purposes.  */
 
@@ -5422,6 +5424,7 @@ region_model::pop_frame (tree result_lvalue,
     }
 
   unbind_region_and_descendents (frame_reg,POISON_KIND_POPPED_STACK);
+  notify_on_pop_frame (this, retval, ctxt);
 }
 
 /* Get the number of frames in this region_model's stack.  */
