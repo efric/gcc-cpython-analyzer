@@ -314,14 +314,19 @@ public:
   {
     diagnostic_metadata m;
     bool warned;
-    // just assuming constants for now
     auto actual_refcnt
 	= m_actual_refcnt->dyn_cast_constant_svalue ()->get_constant ();
-    auto ob_refcnt = m_ob_refcnt->dyn_cast_constant_svalue ()->get_constant ();
-    warned = warning_meta (rich_loc, m, get_controlling_option (),
-			   "expected %qE to have "
-			   "reference count: %qE but ob_refcnt field is: %qE",
-			   m_reg_tree, actual_refcnt, ob_refcnt);
+
+    const auto *ob_refcnt_const_sval = m_ob_refcnt->dyn_cast_constant_svalue ();
+    const auto *ob_refcnt_init_sval = m_ob_refcnt->dyn_cast_initial_svalue ();
+
+    // auto ob_refcnt = m_ob_refcnt->dyn_cast_constant_svalue ()->get_constant ();
+    // if (ob_refcnt)
+	  //   warned = warning_meta (
+		// rich_loc, m, get_controlling_option (),
+		// "expected %qE to have "
+		// "reference count: %qE but ob_refcnt field is: %qE",
+		// m_reg_tree, actual_refcnt, ob_refcnt);
 
     // location_t loc = rich_loc->get_loc ();
     // foo (loc);
@@ -386,11 +391,28 @@ count_expected_pyobj_references (const region_model *model,
   if (!pyobj_region_sval && !pyobj_initial_sval)
     return;
 
+  pyobj_initial_sval->dump(false);
+  if (auto sup = pyobj_initial_sval->get_region())
+  {
+    sup->dump(false);
+    sup->get_parent_region()->dump(false);
+    sup->get_base_region()->dump(false);
+    for (auto &kv : model->get_store())
+    {
+      kv.first->dump(false);
+      kv.second->dump(false);
+    }
+    if (model->get_store()->get_cluster(sup))
+    {
+      inform(UNKNOWN_LOCATION, "HEYO");
+    }
+  }
+
   // todo: support initial sval (e.g passed in as parameter)
   if (pyobj_initial_sval)
     {
-  //     increment_region_refcnt (region_to_refcnt,
-	// 		       pyobj_initial_sval->get_region ());
+      // increment_region_refcnt (region_to_refcnt,
+			      //  pyobj_initial_sval->get_region ());
       return;
     }
 
@@ -433,6 +455,7 @@ check_refcnt (const region_model *model, const region_model *old_model,
   const auto &curr_region = region_refcnt.first;
   const auto &actual_refcnt = region_refcnt.second;
   const svalue *ob_refcnt_sval = retrieve_ob_refcnt_sval (curr_region, model, ctxt);
+  ob_refcnt_sval->dump(true);
   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
       ob_refcnt_sval->get_type (), actual_refcnt);
 
