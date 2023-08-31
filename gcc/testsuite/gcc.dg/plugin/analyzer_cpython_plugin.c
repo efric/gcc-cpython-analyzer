@@ -314,17 +314,46 @@ public:
   {
     diagnostic_metadata m;
     bool warned;
-    // just assuming constants for now
+
     auto actual_refcnt
 	= m_actual_refcnt->dyn_cast_constant_svalue ()->get_constant ();
-    auto ob_refcnt = m_ob_refcnt->dyn_cast_constant_svalue ()->get_constant ();
-    warned = warning_meta (rich_loc, m, get_controlling_option (),
-			   "expected %qE to have "
-			   "reference count: %qE but ob_refcnt field is: %qE",
-			   m_reg_tree, actual_refcnt, ob_refcnt);
+    switch (m_ob_refcnt->get_kind ())
+      {
+      default:
+	return false;
+      case SK_CONSTANT:
+	{
+	  auto ob_refcnt
+	      = m_ob_refcnt->dyn_cast_constant_svalue ()->get_constant ();
+	  warned = warning_meta (
+	      rich_loc, m, get_controlling_option (),
+	      "expected %qE to have "
+	      "reference count: %qE but ob_refcnt field is: %qE",
+	      m_reg_tree, actual_refcnt, ob_refcnt);
+	}
+	break;
+      case SK_BINOP:
+	{
+	  const auto *ob_refcnt_binop_sval
+	      = m_ob_refcnt->dyn_cast_binop_svalue ();
+	  const auto binop = ob_refcnt_binop_sval->get_op ();
+	  const auto *ob_refcnt_delta = ob_refcnt_binop_sval->get_arg1 ();
+	  const auto *ob_refcnt_delta_constant
+	      = ob_refcnt_delta->dyn_cast_constant_svalue ();
 
-    // location_t loc = rich_loc->get_loc ();
-    // foo (loc);
+	  if (!ob_refcnt_delta_constant)
+	    return false;
+
+	  auto ob_refcnt = ob_refcnt_delta_constant->get_constant ();
+
+	  warned = warning_meta (
+	      rich_loc, m, get_controlling_option (),
+	      "expected %qE to have "
+	      "reference count: N + %qE but ob_refcnt field is N + %qE",
+	      m_reg_tree, actual_refcnt, ob_refcnt);
+	}
+	break;
+      }
     return warned;
   }
 
@@ -336,10 +365,6 @@ public:
 
 private:
 
-  void foo(location_t loc) const 
-  {
-    inform(loc, "something is up right here");
-  }
   const region *m_base_region;
   const svalue *m_ob_refcnt;
   const svalue *m_actual_refcnt;
@@ -386,15 +411,45 @@ count_pyobj_references (const region_model *model,
   if (!pyobj_region_sval && !pyobj_initial_sval)
     return;
 
-  // todo: support initial sval (e.g passed in as parameter)
-  if (pyobj_initial_sval)
-    {
-      //     increment_region_refcnt (region_to_refcnt,
-      // 		       pyobj_initial_sval->get_region ());
-      return;
-    }
+  // pyobj_ptr_sval->dump(false);
+  // if (pyobj_ptr_sval->get_type() == pyobj_ptr_tree)
+  // {
+  //   inform(UNKNOWN_LOCATION, "hello");
+  // }
+  // return;
 
-  const region *pyobj_region = pyobj_region_sval->get_pointee ();
+  // pyobj_initial_sval->dump(false);
+  auto mgr = model->get_manager();
+  // mgr->get_symbolic_region (pyobj_initial_sval)->dump (false);
+  // inform (UNKNOWN_LOCATION, "IRRELEVANT BELOW");
+  // if (auto sup = pyobj_initial_sval->get_region())
+  // {
+  //   sup->dump(false);
+  //   sup->get_parent_region()->dump(false);
+  //   sup->get_base_region()->dump(false);
+  //   auto curr_store = model->get_store();
+  //   inform(UNKNOWN_LOCATION, "~~~~");
+  //   const region *brg;
+  //   for (auto kv = curr_store->begin(); kv != curr_store->end(); ++kv)
+  //   {
+  //     brg = (*kv).first;
+  //     brg->dyn_cast_symbolic_region()->get_pointer()->dump(false);
+  //     brg->dump(false);
+  //     auto cluster = (*kv).second;
+  //     cluster->get_base_region()->dump(false);
+  //   inform(UNKNOWN_LOCATION, "=====");
+  //   }
+  //   if (model->get_store()->get_cluster(brg))
+  //   {
+  //     inform(UNKNOWN_LOCATION, "HEYO");
+  //   }
+
+  //   return;
+  // }
+
+  const region *pyobj_region
+      = pyobj_region_sval ? pyobj_region_sval->get_pointee ()
+			  : mgr->get_symbolic_region (pyobj_initial_sval);
   if (!pyobj_region || seen.contains (pyobj_region))
     return;
 
@@ -434,8 +489,14 @@ check_refcnt (const region_model *model,
   const auto &actual_refcnt = region_refcnt.second;
   const svalue *ob_refcnt_sval
       = retrieve_ob_refcnt_sval (curr_region, model, ctxt);
+  if (ob_refcnt_sval->get_kind () == SK_BINOP)
+    ob_refcnt_sval = ob_refcnt_sval->dyn_cast_binop_svalue ()->get_arg1 ();
+  if (!ob_refcnt_sval->dyn_cast_constant_svalue ())
+    return;
+  ob_refcnt_sval->dump (false);
   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
       ob_refcnt_sval->get_type (), actual_refcnt);
+  actual_refcnt_sval->dump (false);
 
   if (ob_refcnt_sval != actual_refcnt_sval)
     {
