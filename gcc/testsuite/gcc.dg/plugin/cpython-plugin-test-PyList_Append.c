@@ -76,3 +76,22 @@ test_PyListAppend_6 ()
   PyList_Append(list, item);
   return list;
 }
+
+PyObject *
+test_PyListAppend_7 (PyObject *item)
+{
+  PyObject *list = PyList_New (0);
+  Py_INCREF(item);
+  PyList_Append(list, item);
+  return list;
+  /* { dg-warning "expected 'item' to have reference count" "" { target *-*-* } .-1 } */
+}
+
+PyObject *
+test_PyListAppend_8 (PyObject *item, PyObject *list)
+{
+  Py_INCREF(item);
+  Py_INCREF(item);
+  PyList_Append(item, list);
+  return list;
+}
