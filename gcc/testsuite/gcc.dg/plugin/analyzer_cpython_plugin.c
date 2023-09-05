@@ -314,17 +314,20 @@ public:
   {
     diagnostic_metadata m;
     bool warned;
-    // just assuming constants for now
-    auto actual_refcnt
-	= m_actual_refcnt->dyn_cast_constant_svalue ()->get_constant ();
-    auto ob_refcnt = m_ob_refcnt->dyn_cast_constant_svalue ()->get_constant ();
-    warned = warning_meta (rich_loc, m, get_controlling_option (),
-			   "expected %qE to have "
-			   "reference count: %qE but ob_refcnt field is: %qE",
-			   m_reg_tree, actual_refcnt, ob_refcnt);
 
-    // location_t loc = rich_loc->get_loc ();
-    // foo (loc);
+    const auto *actual_refcnt_constant
+	= m_actual_refcnt->dyn_cast_constant_svalue ();
+    const auto *ob_refcnt_constant = m_ob_refcnt->dyn_cast_constant_svalue ();
+    if (!actual_refcnt_constant || !ob_refcnt_constant)
+      return false;
+
+    auto actual_refcnt = actual_refcnt_constant->get_constant ();
+    auto ob_refcnt = ob_refcnt_constant->get_constant ();
+    warned = warning_meta (
+	rich_loc, m, get_controlling_option (),
+	"expected %qE to have "
+	"reference count: N + %qE but ob_refcnt field is N + %qE",
+	m_reg_tree, actual_refcnt, ob_refcnt);
     return warned;
   }
 
@@ -336,10 +339,6 @@ public:
 
 private:
 
-  void foo(location_t loc) const 
-  {
-    inform(loc, "something is up right here");
-  }
   const region *m_base_region;
   const svalue *m_ob_refcnt;
   const svalue *m_actual_refcnt;
@@ -369,6 +368,19 @@ increment_region_refcnt (hash_map<const region *, int> &map, const region *key)
   refcnt = existed ? refcnt + 1 : 1;
 }
 
+static const region *
+get_region_from_svalue (const svalue *sval, region_model_manager *mgr)
+{
+  const auto *region_sval = sval->dyn_cast_region_svalue ();
+  if (region_sval)
+    return region_sval->get_pointee ();
+
+  const auto *initial_sval = sval->dyn_cast_initial_svalue ();
+  if (initial_sval)
+    return mgr->get_symbolic_region (initial_sval);
+
+  return nullptr;
+}
 
 /* Recursively fills in region_to_refcnt with the references owned by
    pyobj_ptr_sval.  */
@@ -381,20 +393,9 @@ count_pyobj_references (const region_model *model,
   if (!pyobj_ptr_sval)
     return;
 
-  const auto *pyobj_region_sval = pyobj_ptr_sval->dyn_cast_region_svalue ();
-  const auto *pyobj_initial_sval = pyobj_ptr_sval->dyn_cast_initial_svalue ();
-  if (!pyobj_region_sval && !pyobj_initial_sval)
-    return;
+  region_model_manager *mgr = model->get_manager ();
 
-  // todo: support initial sval (e.g passed in as parameter)
-  if (pyobj_initial_sval)
-    {
-      //     increment_region_refcnt (region_to_refcnt,
-      // 		       pyobj_initial_sval->get_region ());
-      return;
-    }
-
-  const region *pyobj_region = pyobj_region_sval->get_pointee ();
+  const region *pyobj_region = get_region_from_svalue (pyobj_ptr_sval, mgr);
   if (!pyobj_region || seen.contains (pyobj_region))
     return;
 
@@ -409,16 +410,49 @@ count_pyobj_references (const region_model *model,
     return;
 
   const auto &retval_binding_map = retval_cluster->get_map ();
-
   for (const auto &binding : retval_binding_map)
     {
-      const svalue *binding_sval = binding.second;
-      const svalue *unwrapped_sval = binding_sval->unwrap_any_unmergeable ();
-      const region *pointee = unwrapped_sval->maybe_get_region ();
-
-      if (pointee && pointee->get_kind () == RK_HEAP_ALLOCATED)
+      const svalue *binding_sval = binding.second->unwrap_any_unmergeable ();
+      if (get_region_from_svalue (binding_sval, mgr))
 	count_pyobj_references (model, region_to_refcnt, binding_sval, seen);
     }
+}
+
+static void
+unwrap_any_ob_refcnt_sval (const svalue *&ob_refcnt_sval)
+{
+  if (ob_refcnt_sval->get_kind () != SK_CONSTANT)
+    {
+      auto unwrap_cast = ob_refcnt_sval->maybe_undo_cast ();
+      if (!unwrap_cast)
+	unwrap_cast = ob_refcnt_sval;
+
+      if (unwrap_cast->get_kind () == SK_BINOP)
+	ob_refcnt_sval = unwrap_cast->dyn_cast_binop_svalue ()->get_arg1 ();
+    }
+}
+
+static void
+handle_refcnt_mismatch (const region_model *old_model,
+			const ana::region *curr_region,
+			const svalue *ob_refcnt_sval,
+			const svalue *actual_refcnt_sval,
+			region_model_context *ctxt)
+{
+  region_model_manager *mgr = old_model->get_manager ();
+  const svalue *curr_reg_sval
+      = mgr->get_ptr_svalue (pyobj_ptr_tree, curr_region);
+  tree reg_tree = old_model->get_representative_tree (curr_reg_sval);
+
+  if (!reg_tree)
+    return;
+
+  const auto &eg = ctxt->get_eg ();
+  refcnt_stmt_finder finder (*eg, reg_tree);
+  auto pd = make_unique<refcnt_mismatch> (curr_region, ob_refcnt_sval,
+					  actual_refcnt_sval, reg_tree);
+  if (pd && eg)
+    ctxt->warn (std::move (pd), &finder);
 }
 
 /* Compare ob_refcnt field vs the actual reference count of a region */
@@ -427,31 +461,24 @@ check_refcnt (const region_model *model,
 	      const region_model *old_model,
 	      region_model_context *ctxt,
 	      const hash_map<const ana::region *,
-			     int>::iterator::reference_pair region_refcnt)
+			     int>::iterator::reference_pair &region_refcnt)
 {
   region_model_manager *mgr = model->get_manager ();
   const auto &curr_region = region_refcnt.first;
   const auto &actual_refcnt = region_refcnt.second;
+
   const svalue *ob_refcnt_sval
       = retrieve_ob_refcnt_sval (curr_region, model, ctxt);
+  if (!ob_refcnt_sval)
+    return;
+
+  unwrap_any_ob_refcnt_sval (ob_refcnt_sval);
+
   const svalue *actual_refcnt_sval = mgr->get_or_create_int_cst (
       ob_refcnt_sval->get_type (), actual_refcnt);
-
   if (ob_refcnt_sval != actual_refcnt_sval)
-    {
-      const svalue *curr_reg_sval
-	  = mgr->get_ptr_svalue (pyobj_ptr_tree, curr_region);
-      tree reg_tree = old_model->get_representative_tree (curr_reg_sval);
-      if (!reg_tree)
-	return;
-
-      const auto &eg = ctxt->get_eg ();
-      refcnt_stmt_finder finder (*eg, reg_tree);
-      auto pd = make_unique<refcnt_mismatch> (curr_region, ob_refcnt_sval,
-					      actual_refcnt_sval, reg_tree);
-      if (pd && eg)
-	ctxt->warn (std::move (pd), &finder);
-    }
+    handle_refcnt_mismatch (old_model, curr_region, ob_refcnt_sval,
+			    actual_refcnt_sval, ctxt);
 }
 
 static void
@@ -493,8 +520,6 @@ count_all_references (const region_model *model,
   for (const auto &cluster : *model->get_store ())
     {
       auto curr_region = cluster.first;
-      if (curr_region->get_kind () != RK_HEAP_ALLOCATED)
-	continue;
 
       increment_region_refcnt (region_to_refcnt, curr_region);
 
@@ -505,8 +530,8 @@ count_all_references (const region_model *model,
 
 	  const svalue *unwrapped_sval
 	      = binding_sval->unwrap_any_unmergeable ();
-	  // if (unwrapped_sval->get_type () != pyobj_ptr_tree)
-	  // continue;
+	  if (unwrapped_sval->get_type () != pyobj_ptr_tree)
+	  continue;
 
 	  const region *pointee = unwrapped_sval->maybe_get_region ();
 	  if (!pointee || pointee->get_kind () != RK_HEAP_ALLOCATED)

@@ -162,6 +162,7 @@ set plugin_test_list [list \
 	  taint-antipatterns-1.c } \
     { analyzer_cpython_plugin.c \
 	  cpython-plugin-test-no-Python-h.c \
+	  cpython-plugin-test-refcnt.c \
 	  cpython-plugin-test-PyList_Append.c \
 	  cpython-plugin-test-PyList_New.c \
 	  cpython-plugin-test-PyLong_FromLong.c } \
