@@ -92,6 +92,6 @@ test_PyListAppend_8 (PyObject *item, PyObject *list)
 {
   Py_INCREF(item);
   Py_INCREF(item);
-  PyList_Append(item, list);
+  PyList_Append(list, item);
   return list;
 }
