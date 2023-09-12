@@ -326,7 +326,7 @@ public:
     warned = warning_meta (
 	rich_loc, m, get_controlling_option (),
 	"expected %qE to have "
-	"reference count: N + %qE but ob_refcnt field is N + %qE",
+	"reference count: %qE but ob_refcnt field is %qE",
 	m_reg_tree, actual_refcnt, ob_refcnt);
     return warned;
   }
@@ -386,6 +386,7 @@ get_region_from_svalue (const svalue *sval, region_model_manager *mgr)
    pyobj_ptr_sval.  */
 static void
 count_pyobj_references (const region_model *model,
+			region_model_context *ctxt,
 			hash_map<const region *, int> &region_to_refcnt,
 			const svalue *pyobj_ptr_sval,
 			hash_set<const region *> &seen)
@@ -395,7 +396,14 @@ count_pyobj_references (const region_model *model,
 
   region_model_manager *mgr = model->get_manager ();
 
-  const region *pyobj_region = get_region_from_svalue (pyobj_ptr_sval, mgr);
+  if (pyobj_ptr_sval->get_type() && !POINTER_TYPE_P (pyobj_ptr_sval->get_type ()))
+    return;
+
+  const region *pyobj_region
+      = model->deref_rvalue (pyobj_ptr_sval, NULL, ctxt, false);
+  // get_region_from_svalue (pyobj_ptr_sval, mgr);
+  // pyobj_region->dump(false);
+  // model->deref_rvalue(pyobj_region);
   if (!pyobj_region || seen.contains (pyobj_region))
     return;
 
@@ -413,8 +421,13 @@ count_pyobj_references (const region_model *model,
   for (const auto &binding : retval_binding_map)
     {
       const svalue *binding_sval = binding.second->unwrap_any_unmergeable ();
-      if (get_region_from_svalue (binding_sval, mgr))
-	count_pyobj_references (model, region_to_refcnt, binding_sval, seen);
+      if (binding_sval->get_type() && !POINTER_TYPE_P (binding_sval->get_type ()))
+	continue;
+      // if (get_region_from_svalue (binding_sval, mgr))
+      // {
+	count_pyobj_references (model, ctxt, region_to_refcnt, binding_sval,
+				seen);
+      // }
     }
 }
 
@@ -507,7 +520,7 @@ pyobj_refcnt_checker (const region_model *model,
   hash_map<const region *, int> region_to_refcnt;
   hash_set<const region *> seen_regions;
 
-  count_pyobj_references (model, region_to_refcnt, retval, seen_regions);
+  count_pyobj_references (model, ctxt, region_to_refcnt, retval, seen_regions);
   check_refcnts (model, old_model, retval, ctxt, region_to_refcnt);
 }
 
